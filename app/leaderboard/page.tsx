@@ -19,13 +19,26 @@ export default async function LeaderboardPage() {
     myName = profile?.display_name ?? null
   }
 
-  const { data: log } = await supabase
-    .from('scoring_log')
-    .select('user_id, points, match_id, matches(kickoff_at), profiles(display_name)')
-    .order('match_id', { ascending: true })
+  const [{ data: log }, { data: allProfiles }] = await Promise.all([
+    supabase
+      .from('scoring_log')
+      .select('user_id, points, match_id, matches(kickoff_at), profiles(display_name)')
+      .order('match_id', { ascending: true }),
+    supabase
+      .from('profiles')
+      .select('display_name')
+      .not('display_name', 'is', null)
+      .order('display_name'),
+  ])
 
-  // Aggregate total points per player
+  // Start with all registered players at 0 points
   const totals: Record<string, { display_name: string; points: number }> = {}
+  for (const profile of allProfiles ?? []) {
+    if (profile.display_name) {
+      totals[profile.display_name] = { display_name: profile.display_name, points: 0 }
+    }
+  }
+  // Add points from scored matches
   for (const row of log ?? []) {
     const name = (Array.isArray(row.profiles) ? row.profiles[0] : row.profiles)?.display_name
     if (!name) continue
