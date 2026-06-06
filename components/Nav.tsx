@@ -20,36 +20,37 @@ export default function Nav({ isAdmin }: NavProps) {
   }
 
   const links = [
-    { href: '/leaderboard', label: 'Pisteet' },
-    { href: '/matches', label: 'Ottelut' },
-    { href: '/my-predictions', label: 'Veikkaukseni' },
-    ...(isAdmin ? [{ href: '/admin', label: 'Admin' }] : []),
+    { href: '/leaderboard', label: 'Pisteet', short: 'Pisteet' },
+    { href: '/matches', label: 'Ottelut', short: 'Ottelut' },
+    { href: '/my-predictions', label: 'Veikkaukseni', short: 'Omat' },
+    ...(isAdmin ? [{ href: '/admin', label: 'Admin', short: 'Admin' }] : []),
   ]
 
   return (
     <nav className="bg-white border-b border-gray-200 sticky top-0 z-10">
       <div className="max-w-2xl mx-auto px-4">
         <div className="flex items-center justify-between h-12">
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-0.5 sm:gap-1 overflow-x-auto scrollbar-none">
             {links.map((link) => (
               <Link
                 key={link.href}
                 href={link.href}
-                className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+                className={`px-2.5 sm:px-3 py-1.5 rounded text-sm font-medium transition-colors whitespace-nowrap ${
                   pathname.startsWith(link.href)
                     ? 'bg-blue-600 text-white'
                     : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
                 }`}
               >
-                {link.label}
+                <span className="sm:hidden">{link.short}</span>
+                <span className="hidden sm:inline">{link.label}</span>
               </Link>
             ))}
           </div>
           <button
             onClick={signOut}
-            className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
+            className="ml-2 text-xs text-gray-400 hover:text-gray-600 transition-colors whitespace-nowrap shrink-0"
           >
-            Kirjaudu ulos
+            Ulos
           </button>
         </div>
       </div>

@@ -1,7 +1,6 @@
 import { createServerClient } from '@/lib/supabase/server'
-import { stageLabel } from '@/lib/utils'
-import MatchCard from '@/components/MatchCard'
 import { redirect } from 'next/navigation'
+import MatchList from '@/components/MatchList'
 
 export const revalidate = 0
 
@@ -33,41 +32,15 @@ export default async function MatchesPage() {
     )
   }
 
-  // Index predictions by match_id for O(1) lookup
   const predMap: Record<number, { home_score_pred: number; away_score_pred: number; points: number | null }> = {}
   for (const p of predictions ?? []) {
     predMap[p.match_id] = p
   }
 
-  // Group matches by stage
-  const grouped: Record<string, typeof matches> = {}
-  for (const m of matches) {
-    if (!grouped[m.stage]) grouped[m.stage] = []
-    grouped[m.stage].push(m)
-  }
-
-  const stageOrder = ['GROUP_STAGE', 'ROUND_OF_16', 'QUARTER_FINALS', 'SEMI_FINALS', 'THIRD_PLACE', 'FINAL']
-
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <h1 className="text-2xl font-bold">Ottelut</h1>
-
-      {stageOrder.filter((s) => grouped[s]).map((stage) => (
-        <section key={stage}>
-          <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2">
-            {stageLabel(stage)}
-          </h2>
-          <div className="space-y-2">
-            {grouped[stage].map((m) => (
-              <MatchCard
-                key={m.id}
-                match={m}
-                prediction={predMap[m.id]}
-              />
-            ))}
-          </div>
-        </section>
-      ))}
+      <MatchList matches={matches} predMap={predMap} />
     </div>
   )
 }

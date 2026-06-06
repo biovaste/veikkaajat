@@ -5,7 +5,13 @@ import Nav from '@/components/Nav'
 
 export const metadata: Metadata = {
   title: 'Veikkaajat — MM 2026',
-  description: 'Jalkapallon MM 2026 tulosveikkaus',
+  description: 'Jalkapallon MM 2026 tulosveikkaus kaveriporukalle',
+  openGraph: {
+    title: 'Veikkaajat — MM 2026',
+    description: 'Jalkapallon MM 2026 tulosveikkaus kaveriporukalle',
+    type: 'website',
+  },
+  viewport: 'width=device-width, initial-scale=1',
 }
 
 export default async function RootLayout({
