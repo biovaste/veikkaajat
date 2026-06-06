@@ -198,12 +198,14 @@ export async function sendStatsTable(chatId?: number | string): Promise<void> {
       byMatch.get(row.match_id)!.push({ user_id: row.user_id, points: row.points, kickoff_at: m?.kickoff_at ?? '' })
     }
 
-    // Group matches by Helsinki date (UTC+3 → add 3h before taking date)
+    // Group matches by "accounting day": resets at 10:00 Helsinki (UTC+3).
+    // Shift = Helsinki offset (3h) minus 10h = -7h from UTC, so games finishing
+    // after midnight Helsinki (US kick-offs) still fall under the previous day.
     const byDay: Map<string, number[]> = new Map()
     for (const [match_id, rows] of byMatch) {
       const kickoff = rows[0]?.kickoff_at
       const helsinkiDate = kickoff
-        ? new Date(new Date(kickoff).getTime() + 3 * 60 * 60 * 1000).toISOString().slice(0, 10)
+        ? new Date(new Date(kickoff).getTime() - 7 * 60 * 60 * 1000).toISOString().slice(0, 10)
         : 'unknown'
       if (!byDay.has(helsinkiDate)) byDay.set(helsinkiDate, [])
       byDay.get(helsinkiDate)!.push(match_id)
