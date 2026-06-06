@@ -15,7 +15,7 @@ export function stageLabel(stage: string): string {
     ROUND_OF_16: 'Kahdeksasfinaalit',
     QUARTER_FINALS: 'Neljännesfinaalit',
     SEMI_FINALS: 'Puolifinaalit',
-    THIRD_PLACE: 'Pronssiotttelu',
+    THIRD_PLACE: 'Pronssiottelu',
     FINAL: 'Finaali',
   }
   return labels[stage] ?? stage

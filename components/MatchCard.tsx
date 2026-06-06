@@ -1,4 +1,5 @@
 import { formatDate } from '@/lib/utils'
+import { getCountry, groupLabel } from '@/lib/countries'
 import CountdownTimer from './CountdownTimer'
 import PredictionForm from './PredictionForm'
 
@@ -30,17 +31,25 @@ export default function MatchCard({ match, prediction }: Props) {
   const isPostponed = match.status === 'POSTPONED'
   const isCancelled = match.status === 'CANCELLED'
 
+  const home = getCountry(match.home_team)
+  const away = getCountry(match.away_team)
+  const group = groupLabel(match.group_name)
+
   return (
     <div className="bg-white rounded-lg border border-gray-200 px-4 py-3">
       {/* Match header */}
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
           <div className="font-medium text-sm">
-            {match.home_team} – {match.away_team}
+            {home.flag && <span className="mr-1">{home.flag}</span>}
+            {home.name}
+            <span className="text-gray-400 mx-1">–</span>
+            {away.flag && <span className="mr-1">{away.flag}</span>}
+            {away.name}
           </div>
           <div className="text-xs text-gray-400 mt-0.5">
             {formatDate(match.kickoff_at)}
-            {match.group_name && ` · ${match.group_name}`}
+            {group && ` · ${group}`}
           </div>
         </div>
 
@@ -65,7 +74,6 @@ export default function MatchCard({ match, prediction }: Props) {
       {!isCancelled && (
         <div className="mt-2 pt-2 border-t border-gray-100">
           {hasResult ? (
-            // Match finished — show prediction + points
             prediction ? (
               <div className="flex items-center justify-between text-sm">
                 <span className="text-gray-500 text-xs">
@@ -83,7 +91,6 @@ export default function MatchCard({ match, prediction }: Props) {
               <p className="text-xs text-gray-300">Et veikannut tätä ottelua</p>
             )
           ) : kickoffPassed || isPostponed ? (
-            // Kicked off but no result yet, or postponed — show locked prediction
             prediction ? (
               <div className="flex items-center gap-2 text-sm">
                 <span className="text-xs text-gray-400">Veikkauksesi:</span>
@@ -96,7 +103,6 @@ export default function MatchCard({ match, prediction }: Props) {
               <p className="text-xs text-gray-300">Et veikannut tätä ottelua</p>
             )
           ) : (
-            // Pre-kickoff — show editable form
             <PredictionForm
               matchId={match.id}
               initialHome={prediction?.home_score_pred}
