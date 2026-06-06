@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient, createServiceRoleClient } from '@/lib/supabase/server'
 import { calculatePoints } from '@/lib/scoring/engine'
+import { sendResultMessage, type LeaderboardRow, type PlayerInfo } from '@/lib/telegram/notify'
 
 export async function POST(request: NextRequest) {
   try {
@@ -25,6 +26,25 @@ export async function POST(request: NextRequest) {
     ) {
       return NextResponse.json({ error: 'Virheelliset tiedot' }, { status: 400 })
     }
+
+    const admin = createServiceRoleClient()
+
+    // Snapshot leaderboard BEFORE scoring this match
+    const { data: prevLog } = await admin
+      .from('scoring_log')
+      .select('user_id, points')
+      .neq('match_id', match_id)
+
+    const prevTotals: Record<string, number> = {}
+    for (const r of prevLog ?? []) {
+      prevTotals[r.user_id] = (prevTotals[r.user_id] ?? 0) + r.points
+    }
+
+    // Fetch all players
+    const { data: players } = await admin
+      .from('profiles')
+      .select('id, display_name, telegram_chat_id')
+      .order('display_name')
 
     // Update match result (admin RLS policy allows this)
     const { error: matchError } = await supabase
@@ -60,17 +80,13 @@ export async function POST(request: NextRequest) {
       return { id: p.id, user_id: p.user_id, points: total, breakdown }
     })
 
-    // Bulk update predictions.points using service role (bypasses RLS for writes from other users)
-    const admin = createServiceRoleClient()
-
-    // Update each prediction's points individually (no bulk update on arbitrary rows in postgrest)
+    // Bulk update predictions.points (service role — writes to other users' rows)
     const updateErrors = await Promise.all(
       updates.map(({ id, points }) =>
         admin.from('predictions').update({ points }).eq('id', id)
       )
     )
     const updateError = updateErrors.find((r) => r.error)?.error
-
     if (updateError) return NextResponse.json({ error: updateError.message }, { status: 500 })
 
     // Insert scoring_log rows
@@ -86,6 +102,56 @@ export async function POST(request: NextRequest) {
       )
 
     if (logError) console.error('[override-result] scoring_log insert failed:', logError.message)
+
+    // Build new leaderboard for Telegram message
+    const newTotals: Record<string, number> = { ...prevTotals }
+    for (const u of updates) {
+      newTotals[u.user_id] = (newTotals[u.user_id] ?? 0) + u.points
+    }
+
+    // Rank helpers
+    const rankMap = (totals: Record<string, number>) => {
+      const sorted = Object.entries(totals).sort((a, b) => b[1] - a[1])
+      return Object.fromEntries(sorted.map(([id], i) => [id, i + 1]))
+    }
+
+    const prevRanks = rankMap(prevTotals)
+    const newRanks = rankMap(newTotals)
+
+    // All players sorted by new rank for the leaderboard
+    const leaderboard: LeaderboardRow[] = (players ?? [])
+      .filter((p) => newTotals[p.id] !== undefined || prevTotals[p.id] !== undefined)
+      .sort((a, b) => (newRanks[a.id] ?? 999) - (newRanks[b.id] ?? 999))
+      .map((p) => ({
+        user_id: p.id,
+        display_name: p.display_name,
+        total: newTotals[p.id] ?? 0,
+        prev_position: prevRanks[p.id] ?? (Object.keys(prevRanks).length + 1),
+        new_position: newRanks[p.id] ?? (Object.keys(newRanks).length + 1),
+      }))
+
+    // Fetch match info for the message
+    const { data: matchRow } = await admin
+      .from('matches')
+      .select('id, home_team, away_team, kickoff_at, home_score, away_score')
+      .eq('id', match_id)
+      .single()
+
+    // Send Telegram message (non-blocking — don't fail the API response on Telegram errors)
+    if (matchRow && process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_GROUP_CHAT_ID) {
+      const predRows = updates.map((u) => ({
+        user_id: u.user_id,
+        home_score_pred: predictions.find((p) => p.id === u.id)?.home_score_pred ?? 0,
+        away_score_pred: predictions.find((p) => p.id === u.id)?.away_score_pred ?? 0,
+        points: u.points,
+      }))
+      sendResultMessage(
+        { ...matchRow, home_score, away_score },
+        predRows,
+        (players ?? []) as PlayerInfo[],
+        leaderboard,
+      ).catch((err) => console.error('[override-result] Telegram error:', err))
+    }
 
     return NextResponse.json({ scored: updates.length, match_id })
   } catch (err) {

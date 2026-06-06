@@ -4,7 +4,11 @@
       "Bash(npx create-next-app@latest . --typescript --app --tailwind --eslint --src-dir=false --import-alias=\"@/*\" --yes)",
       "PowerShell(node --version)",
       "PowerShell(npm --version)",
-      "PowerShell(Get-Command node)"
+      "PowerShell(Get-Command node)",
+      "Bash(New-Item -ItemType Directory -Force \"E:\\\\claude\\\\veikkaajat\\\\supabase\\\\functions\\\\check-upcoming-matches\")",
+      "Bash(Out-Null)",
+      "Bash(New-Item -ItemType Directory -Force \"E:\\\\claude\\\\veikkaajat\\\\supabase\\\\functions\\\\poll-match-results\")",
+      "PowerShell(cd E:\\\\claude\\\\veikkaajat; $env:PATH = [System.Environment]::GetEnvironmentVariable\\(\"PATH\",\"Machine\"\\) + \";\" + [System.Environment]::GetEnvironmentVariable\\(\"PATH\",\"User\"\\); npx tsc --noEmit 2>&1 | head -60)"
     ]
   }
 }

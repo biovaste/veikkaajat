@@ -8,8 +8,61 @@ interface Player {
   email: string
   display_name: string
   is_admin: boolean
-  created_at: string
+  telegram_chat_id: string | null
   prediction_count: number
+}
+
+function TelegramIdCell({ player, onSaved }: { player: Player; onSaved: () => void }) {
+  const [editing, setEditing] = useState(false)
+  const [value, setValue] = useState(player.telegram_chat_id ?? '')
+  const [saving, setSaving] = useState(false)
+  const supabase = createClient()
+
+  async function save() {
+    setSaving(true)
+    await supabase
+      .from('profiles')
+      .update({ telegram_chat_id: value.trim() || null })
+      .eq('id', player.id)
+    setSaving(false)
+    setEditing(false)
+    onSaved()
+  }
+
+  if (editing) {
+    return (
+      <div className="flex items-center gap-1">
+        <input
+          autoFocus
+          type="text"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder="chat_id"
+          className="w-32 border border-gray-300 rounded px-2 py-0.5 text-xs font-mono"
+        />
+        <button onClick={save} disabled={saving} className="text-xs text-blue-600 hover:underline">
+          {saving ? '...' : 'OK'}
+        </button>
+        <button onClick={() => setEditing(false)} className="text-xs text-gray-400 hover:underline">
+          Peru
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <button
+      onClick={() => setEditing(true)}
+      className="text-xs font-mono text-left hover:underline"
+      title="Klikkaa muokataksesi"
+    >
+      {player.telegram_chat_id ? (
+        <span className="text-green-700">{player.telegram_chat_id}</span>
+      ) : (
+        <span className="text-gray-300 italic">–</span>
+      )}
+    </button>
+  )
 }
 
 export default function PlayersPage() {
@@ -25,20 +78,13 @@ export default function PlayersPage() {
   async function loadPlayers() {
     const { data } = await supabase
       .from('profiles')
-      .select('id, email, display_name, is_admin, created_at')
+      .select('id, email, display_name, is_admin, telegram_chat_id, created_at')
       .order('display_name')
 
     if (data) {
-      // Get prediction counts
-      const { data: counts } = await supabase
-        .from('predictions')
-        .select('user_id')
-
+      const { data: counts } = await supabase.from('predictions').select('user_id')
       const countMap: Record<string, number> = {}
-      counts?.forEach((p) => {
-        countMap[p.user_id] = (countMap[p.user_id] ?? 0) + 1
-      })
-
+      counts?.forEach((p) => { countMap[p.user_id] = (countMap[p.user_id] ?? 0) + 1 })
       setPlayers(data.map((p) => ({ ...p, prediction_count: countMap[p.id] ?? 0 })))
     }
     setLoading(false)
@@ -79,14 +125,14 @@ export default function PlayersPage() {
       <div className="bg-white rounded-lg border border-gray-200 p-4">
         <h2 className="font-semibold mb-3">Kutsu pelaaja</h2>
         <form onSubmit={handleInvite} className="space-y-3">
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             <input
               type="text"
               required
               placeholder="Nimi"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm"
+              className="flex-1 min-w-36 border border-gray-300 rounded-lg px-3 py-2 text-sm"
             />
             <input
               type="email"
@@ -94,7 +140,7 @@ export default function PlayersPage() {
               placeholder="sähköposti@example.fi"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm"
+              className="flex-1 min-w-48 border border-gray-300 rounded-lg px-3 py-2 text-sm"
             />
             <button
               type="submit"
@@ -112,6 +158,12 @@ export default function PlayersPage() {
         </form>
       </div>
 
+      {/* Telegram registration note */}
+      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800">
+        <strong>Telegram-rekisteröinti:</strong> Pelaajan täytyy lähettää /start botille,
+        jolloin botti kertoo hänen Chat ID:nsä. Syötä se alle Telegram-sarakkeeseen.
+      </div>
+
       {/* Player list */}
       <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
         {loading ? (
@@ -124,6 +176,7 @@ export default function PlayersPage() {
               <tr>
                 <th className="text-left px-4 py-2 font-medium text-gray-600">Nimi</th>
                 <th className="text-left px-4 py-2 font-medium text-gray-600 hidden sm:table-cell">Sähköposti</th>
+                <th className="text-left px-4 py-2 font-medium text-gray-600">Telegram</th>
                 <th className="text-right px-4 py-2 font-medium text-gray-600">Veikkauksia</th>
               </tr>
             </thead>
@@ -135,6 +188,9 @@ export default function PlayersPage() {
                     {p.is_admin && <span className="ml-1.5 text-xs bg-blue-100 text-blue-700 rounded px-1">admin</span>}
                   </td>
                   <td className="px-4 py-2.5 text-gray-500 hidden sm:table-cell">{p.email}</td>
+                  <td className="px-4 py-2.5">
+                    <TelegramIdCell player={p} onSaved={loadPlayers} />
+                  </td>
                   <td className="px-4 py-2.5 text-right text-gray-600">{p.prediction_count}</td>
                 </tr>
               ))}

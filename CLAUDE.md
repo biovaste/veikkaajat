@@ -33,7 +33,13 @@ NEXT_PUBLIC_APP_URL=
 FOOTBALL_DATA_API_KEY=
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_GROUP_CHAT_ID=
+NEXT_PUBLIC_APP_URL=
 # SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are auto-injected
+```
+
+**Vercel only (not needed by edge functions):**
+```
+TELEGRAM_WEBHOOK_SECRET=    # random string — set in both Vercel and when calling setWebhook
 ```
 
 ## Scoring Rules
@@ -55,7 +61,7 @@ Scoring engine: `lib/scoring/engine.ts` — pure function, unit-tested.
 
 ## Database Schema
 
-All tables are in `supabase/migrations/`. Run them in order (0001 → 0002 → 0003) in the Supabase SQL editor.
+All tables are in `supabase/migrations/`. Run them in order (0001 → 0005) in the Supabase SQL editor.
 
 | Table | Purpose |
 |---|---|
@@ -96,7 +102,10 @@ lib/
     client.ts             # createBrowserClient (client components)
     server.ts             # createServerClient + createServiceRoleClient (server)
   football-data/client.ts # Typed wrapper: fetchMatches(), fetchMatch()
-  telegram/notify.ts      # sendMatchResultNotification() — Phase 4
+  telegram/
+    bot.ts              # sendMessage(), sendPhoto(), getQuickChartUrl() — raw HTTP
+    notify.ts           # sendKickoffMessage(), sendResultMessage(), sendReminderDM(),
+                        # sendStatsTable(), sendChartImage() — Phase 4
   scoring/engine.ts       # calculatePoints() — Phase 3
   utils.ts                # formatDate (Finnish), stageLabel(), resultLabel()
 
@@ -105,6 +114,8 @@ app/api/
   admin/seed-matches/route.ts     # POST: import from football-data.org
   admin/override-result/route.ts  # POST: set result + score + notify — Phase 3
   admin/invite-player/route.ts    # POST: send magic link invite
+  telegram/
+    webhook/route.ts              # Telegram bot webhook — /start, /chart, /stats
 
 proxy.ts                # Next.js proxy (was: middleware): session refresh + auth redirect
 supabase/
@@ -112,8 +123,11 @@ supabase/
     0001_initial_schema.sql
     0002_rls_policies.sql
     0003_triggers.sql
+    0004_matches_admin_policies.sql
+    0005_telegram_fields.sql      # telegram_chat_id on profiles; reminder_sent/kickoff_msg_sent on matches
   functions/
-    poll-match-results/index.ts   # Deno edge function — Phase 5
+    poll-match-results/index.ts      # Deno: polls football-data.org, scores, sends result message
+    check-upcoming-matches/index.ts  # Deno: sends reminder DMs + kickoff group message
 types/
   database.ts            # Hand-written types (replace with supabase gen types)
 ```
@@ -229,42 +243,101 @@ npm test           # vitest unit tests
 
 ---
 
-### 🔲 Phase 4 — Telegram Notifications
-**Goal:** Telegram message fires after every scored match.
+### ✅ Phase 4 — Telegram Bot
+**Status: Complete**
 
-Files to create:
-- `lib/telegram/notify.ts` — `sendMatchResultNotification()`
-- Wire into `override-result` route
+**What it does:**
+- **Kickoff message** (group): when match kicks off, shows all predictions + who didn't predict
+- **Result message** (group): after scoring, shows result, predictions with points, leaderboard with position arrows (↑↓→)
+- **Reminder DMs**: sent 30 min before kickoff (or at 22:00 Helsinki if match starts 23:00–05:00) to players who haven't predicted
+- **`/chart`** (group command): sends cumulative points line chart image via QuickChart.io
+- **`/stats`** (group command): sends monospace stats table (pts, avg, exact scores, correct result %)
+- **`/start`** (DM to bot): bot replies with the player's Telegram chat ID for admin to register
 
-Prerequisites: create Telegram bot via BotFather, add to group, get chat ID, set `TELEGRAM_BOT_TOKEN` + `TELEGRAM_GROUP_CHAT_ID` env vars.
+**New files:**
+- `lib/telegram/bot.ts` — raw HTTP helpers
+- `lib/telegram/notify.ts` — application-level message functions
+- `app/api/telegram/webhook/route.ts` — bot update handler
+- `supabase/functions/check-upcoming-matches/index.ts` — Deno, every 5 min
+- `supabase/functions/poll-match-results/index.ts` — Deno, every 30 min (also scores + notifies)
 
-Done when: manual override triggers correct Telegram message to the group.
+**New DB columns (migration 0005):**
+- `profiles.telegram_chat_id` — TEXT nullable, set by admin in Players page
+- `matches.reminder_sent` — BOOLEAN, prevents double reminders
+- `matches.kickoff_msg_sent` — BOOLEAN, prevents double kickoff messages
+
+**Setup steps:**
+
+1. **Create bot**: message @BotFather on Telegram → `/newbot` → copy the token
+2. **Add bot to group**: invite it, make it an admin so it can send messages
+3. **Get group chat_id**: send a message in the group, then open `https://api.telegram.org/bot<TOKEN>/getUpdates` — look for `message.chat.id` (negative number for groups)
+4. **Set env vars** in Vercel dashboard:
+   ```
+   TELEGRAM_BOT_TOKEN=<token>
+   TELEGRAM_GROUP_CHAT_ID=<negative-number>
+   TELEGRAM_WEBHOOK_SECRET=<any-random-string>
+   ```
+5. **Register webhook** (run once after deploying):
+   ```
+   curl -X POST "https://api.telegram.org/bot<TOKEN>/setWebhook" \
+     -d "url=https://<your-app>.vercel.app/api/telegram/webhook" \
+     -d "secret_token=<TELEGRAM_WEBHOOK_SECRET>"
+   ```
+6. **Run migration 0005** in Supabase SQL editor
+7. **Register players**: each player DMs `/start` to the bot → copies their chat ID → admin enters it in Admin → Pelaajat page
+
+**Bot commands available in the group:**
+- `/chart` — sends line chart image
+- `/stats` — sends stats table
+- `/help` — lists commands
 
 ---
 
 ### 🔲 Phase 5 — Automated Polling
-**Goal:** Results polled every 30 min without manual action.
+**Goal:** Results polled and kickoff/reminder messages sent automatically.
 
-Files to create:
-- `supabase/functions/poll-match-results/index.ts` — Deno edge function
+**Files:** already created in Phase 4 (both edge functions are complete).
 
-Setup steps:
+**Setup steps:**
 1. Enable `pg_cron` + `pg_net` extensions in Supabase dashboard (Database → Extensions)
-2. `supabase functions deploy poll-match-results`
-3. `supabase secrets set FOOTBALL_DATA_API_KEY=... TELEGRAM_BOT_TOKEN=... TELEGRAM_GROUP_CHAT_ID=...`
-4. Register cron in Supabase SQL editor:
-```sql
-select cron.schedule(
-  'poll-match-results', '*/30 * * * *',
-  $$ select net.http_post(
-    url := 'https://<ref>.supabase.co/functions/v1/poll-match-results',
-    headers := '{"Authorization": "Bearer <ANON_KEY>"}'::jsonb,
-    body := '{}'::jsonb
-  ) $$
-);
-```
+2. Install Supabase CLI and authenticate: `supabase login`
+3. Link project: `supabase link --project-ref <ref>`
+4. Set edge function secrets:
+   ```
+   supabase secrets set FOOTBALL_DATA_API_KEY=...
+   supabase secrets set TELEGRAM_BOT_TOKEN=...
+   supabase secrets set TELEGRAM_GROUP_CHAT_ID=...
+   supabase secrets set NEXT_PUBLIC_APP_URL=https://...
+   ```
+5. Deploy both functions:
+   ```
+   supabase functions deploy poll-match-results
+   supabase functions deploy check-upcoming-matches
+   ```
+6. Register cron jobs in Supabase SQL editor:
+   ```sql
+   -- Poll results every 30 min
+   select cron.schedule(
+     'poll-match-results', '*/30 * * * *',
+     $$ select net.http_post(
+       url := 'https://<ref>.supabase.co/functions/v1/poll-match-results',
+       headers := '{"Authorization": "Bearer <ANON_KEY>"}'::jsonb,
+       body := '{}'::jsonb
+     ) $$
+   );
 
-Done when: edge function invokes successfully; `cron.job_run_details` shows scheduled runs.
+   -- Check upcoming matches every 5 min
+   select cron.schedule(
+     'check-upcoming-matches', '*/5 * * * *',
+     $$ select net.http_post(
+       url := 'https://<ref>.supabase.co/functions/v1/check-upcoming-matches',
+       headers := '{"Authorization": "Bearer <ANON_KEY>"}'::jsonb,
+       body := '{}'::jsonb
+     ) $$
+   );
+   ```
+
+Done when: `select * from cron.job_run_details order by start_time desc limit 10;` shows successful runs.
 
 ---
 
