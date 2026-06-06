@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient, createServiceRoleClient } from '@/lib/supabase/server'
+import { createServerClient } from '@/lib/supabase/server'
 import { fetchMatches, type MatchStage } from '@/lib/football-data/client'
 
 export async function POST(request: NextRequest) {
@@ -31,8 +31,7 @@ export async function POST(request: NextRequest) {
       status: m.status,
     }))
 
-    const admin = createServiceRoleClient()
-    const { error, count } = await admin
+    const { error, count } = await supabase
       .from('matches')
       .upsert(rows, { onConflict: 'external_id', count: 'exact' })
 
