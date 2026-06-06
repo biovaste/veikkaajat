@@ -35,26 +35,28 @@ export async function POST(request: NextRequest) {
   const text = msg.text.trim().split('@')[0].toLowerCase()
   const isGroup = msg.chat.type === 'group' || msg.chat.type === 'supergroup'
 
-  try {
-    if (text.startsWith('/start')) {
-      const reply =
-        `Moi! 👋\n\n` +
-        `Chat ID-si on: <code>${chatId}</code>\n\n` +
-        `Kopioi numero ja liitä se sovelluksen Asetukset-sivulle (⚙), niin saat henkilökohtaiset muistutukset veikkaamattomista otteluista.`
-      await sendMessage(chatId, reply)
-    } else if (text === '/chart' && isGroup) {
-      await sendChartImage()
-    } else if (text === '/stats' && isGroup) {
-      await sendStatsTable()
-    } else if (text === '/help' && isGroup) {
-      await sendMessage(
-        chatId,
-        '📋 Komennot:\n/chart — pistekehityskaavio\n/stats — tilastotaulukko\n\n' +
-        'Veikkaa osoitteessa: ' + (process.env.NEXT_PUBLIC_APP_URL ?? ''),
-      )
-    }
-  } catch (err) {
-    console.error('[webhook]', err)
+  if (text.startsWith('/start')) {
+    const reply =
+      `Moi! 👋\n\n` +
+      `Chat ID-si on: <code>${chatId}</code>\n\n` +
+      `Kopioi numero ja liitä se sovelluksen Asetukset-sivulle (⚙), niin saat henkilökohtaiset muistutukset veikkaamattomista otteluista.`
+    await sendMessage(chatId, reply).catch(console.error)
+  } else if (text === '/chart' && isGroup) {
+    await sendChartImage().catch(async (err) => {
+      console.error('[webhook /chart]', err)
+      await sendMessage(chatId, '⚠️ Kaavio ei onnistu juuri nyt.').catch(console.error)
+    })
+  } else if (text === '/stats' && isGroup) {
+    await sendStatsTable().catch(async (err) => {
+      console.error('[webhook /stats]', err)
+      await sendMessage(chatId, '⚠️ Tilastot ei onnistu juuri nyt.').catch(console.error)
+    })
+  } else if (text === '/help' && isGroup) {
+    await sendMessage(
+      chatId,
+      '📋 <b>Komennot:</b>\n/chart — pistekehityskaavio\n/stats — tilastotaulukko\n\n' +
+      'Veikkaa: ' + (process.env.NEXT_PUBLIC_APP_URL ?? ''),
+    ).catch(console.error)
   }
 
   return NextResponse.json({ ok: true })
