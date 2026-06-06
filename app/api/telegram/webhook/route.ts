@@ -41,7 +41,7 @@ export async function POST(request: NextRequest) {
       const reply =
         `Moi! 👋\n\n` +
         `Chat ID-si on: <code>${chatId}</code>\n\n` +
-        `Lähetä tämä numero adminille, jotta saat henkilökohtaiset muistutukset veikkaamattomista otteluista.`
+        `Kopioi numero ja liitä se sovelluksen Asetukset-sivulle (⚙), niin saat henkilökohtaiset muistutukset veikkaamattomista otteluista.`
       await sendMessage(chatId, reply)
     } else if (text === '/chart' && isGroup) {
       await sendChartImage()
