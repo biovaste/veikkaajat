@@ -38,6 +38,7 @@ const COUNTRIES: Record<string, CountryInfo> = {
   'Slovenia': { fi: 'Slovenia', code: 'si' },
   'Georgia': { fi: 'Georgia', code: 'ge' },
   'Bosnia and Herzegovina': { fi: 'Bosnia-Hertsegovina', code: 'ba' },
+  'Bosnia-Herzegovina': { fi: 'Bosnia-Hertsegovina', code: 'ba' },
   'North Macedonia': { fi: 'Pohjois-Makedonia', code: 'mk' },
   'Iceland': { fi: 'Islanti', code: 'is' },
   'Montenegro': { fi: 'Montenegro', code: 'me' },
@@ -71,6 +72,7 @@ const COUNTRIES: Record<string, CountryInfo> = {
   'Trinidad and Tobago': { fi: 'Trinidad ja Tobago', code: 'tt' },
   'Cuba': { fi: 'Kuuba', code: 'cu' },
   'Suriname': { fi: 'Suriname', code: 'sr' },
+  'Curaçao': { fi: 'Curaçao', code: 'cw' },
 
   // CAF (Africa)
   'Morocco': { fi: 'Marokko', code: 'ma' },
@@ -86,6 +88,7 @@ const COUNTRIES: Record<string, CountryInfo> = {
   'Ivory Coast': { fi: 'Norsunluurannikko', code: 'ci' },
   'South Africa': { fi: 'Etelä-Afrikka', code: 'za' },
   'DR Congo': { fi: 'Kongon dem. tasavalta', code: 'cd' },
+  'Congo DR': { fi: 'Kongon dem. tasavalta', code: 'cd' },
   'Democratic Republic of Congo': { fi: 'Kongon dem. tasavalta', code: 'cd' },
   'Tanzania': { fi: 'Tansania', code: 'tz' },
   'Uganda': { fi: 'Uganda', code: 'ug' },
@@ -93,6 +96,7 @@ const COUNTRIES: Record<string, CountryInfo> = {
   'Zimbabwe': { fi: 'Zimbabwe', code: 'zw' },
   'Burkina Faso': { fi: 'Burkina Faso', code: 'bf' },
   'Cape Verde': { fi: 'Kap Verde', code: 'cv' },
+  'Cape Verde Islands': { fi: 'Kap Verde', code: 'cv' },
   'Gabon': { fi: 'Gabon', code: 'ga' },
   'Mozambique': { fi: 'Mosambik', code: 'mz' },
   'Angola': { fi: 'Angola', code: 'ao' },
