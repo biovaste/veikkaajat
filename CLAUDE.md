@@ -11,6 +11,7 @@ World Cup 2026 score prediction app for a small group of friends (<20 players).
 | Hosting | Vercel (free tier) |
 | Scheduled polling | Supabase Edge Function + pg_cron |
 | Match data | football-data.org v4 API (free tier) |
+| xG data | api-football.com v3 (free tier, 100 req/day) |
 | Notifications | Telegram Bot API |
 
 UI language: Finnish. Layout: mobile-first. No open signup — admin invites players by email.
@@ -23,53 +24,66 @@ NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=        # server-side only, never in client code
 FOOTBALL_DATA_API_KEY=
+API_FOOTBALL_KEY=                 # api-sports.io key for xG data
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_GROUP_CHAT_ID=
 NEXT_PUBLIC_APP_URL=
+TELEGRAM_WEBHOOK_SECRET=          # random string — set in both Vercel and when calling setWebhook
 ```
 
 **Supabase Edge Function secrets** (set via `supabase secrets set`):
 ```
 FOOTBALL_DATA_API_KEY=
+API_FOOTBALL_KEY=
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_GROUP_CHAT_ID=
 NEXT_PUBLIC_APP_URL=
 # SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are auto-injected
 ```
 
-**Vercel only (not needed by edge functions):**
-```
-TELEGRAM_WEBHOOK_SECRET=    # random string — set in both Vercel and when calling setWebhook
-```
-
 ## Scoring Rules
 
+### Match predictions (max 5 pts per match)
 - 3 pts — correct match result (win/draw/loss)
 - +1 pt — correct home team goal tally
 - +1 pt — correct away team goal tally
-- **Max 5 pts per match**
+
+### Special bets (category_bets table)
+- 10 pts — World Champion (deadline: first match kickoff)
+- 5 pts — Top Scorer (deadline: first match kickoff); 50 named players + wildcard per country
+- 4 pts — 2 advancing teams per group (BOTH must be correct; 1 correct = 0 pts; deadline: group's first match)
 
 Scoring engine: `lib/scoring/engine.ts` — pure function, unit-tested.
+Special bet scoring: `app/api/admin/score-categories/route.ts`.
 
 ## Key Architectural Decisions
 
-- **Admin writes**: seed and override API routes use `createServerClient()` (anon key + cookie session). RLS allows writes because `profiles.is_admin = true` for the authenticated user (see migration 0004). `createServiceRoleClient()` is reserved for `auth.admin.*` operations (e.g. inviting users) — it uses `@supabase/supabase-js` `createClient` directly with no cookies. Note: the new Supabase "Secret API key" is NOT the legacy `service_role` JWT and does not bypass RLS — don't confuse them. The edge function (Phase 5) bypasses RLS by calling the Supabase REST API directly with the service role key in the `apikey` header, which is a different path. Admin pages use the admin layout which server-side checks `profiles.is_admin`. The proxy (`proxy.ts`) does not check admin status — it only handles session refresh and unauthenticated redirects.
+- **Admin writes**: seed and override API routes use `createServerClient()` (anon key + cookie session). RLS allows writes because `profiles.is_admin = true` for the authenticated user (see migration 0004). `createServiceRoleClient()` is reserved for `auth.admin.*` operations (e.g. inviting users) — it uses `@supabase/supabase-js` `createClient` directly with no cookies. Note: the new Supabase "Secret API key" is NOT the legacy `service_role` JWT and does not bypass RLS — don't confuse them. The edge function bypasses RLS via the service role key directly.
 - **Kickoff lock**: enforced both client-side (hide form) and server-side (`POST /api/predictions` rejects if `kickoff_at <= now()`).
 - **No open signup**: admin uses `/admin/players` to invite users via `supabase.auth.admin.inviteUserByEmail()`.
 - **football-data.org rate limit**: 10 req/min. Group stage seed is one bulk call. The edge function polls one match at a time with a 7s sleep between calls.
+- **Scoring log**: `scoring_log` rows are deleted and re-inserted on every score/re-score to prevent point stacking.
+- **xG**: fetched from api-football.com after each match is scored (best-effort, non-fatal). `af_fixture_id` cached on match row to avoid re-lookup on re-scoring.
+- **Group labels**: football-data.org returns `Group A` etc.; displayed as `Ryhmä A` via `groupLabel()` in `lib/countries.ts`.
 - **Types**: Supabase client uses untyped `any` generics for now. Run `supabase gen types typescript --project-id <ref> > types/database.ts` after `supabase login` to get proper types.
 
 ## Database Schema
 
-All tables are in `supabase/migrations/`. Run them in order (0001 → 0005) in the Supabase SQL editor.
+All tables are in `supabase/migrations/`. Migrations 0001–0009 must be applied in order in the Supabase SQL editor.
 
 | Table | Purpose |
 |---|---|
 | `profiles` | One row per auth user; auto-created via trigger on `auth.users` insert |
-| `matches` | Seeded from football-data.org; result fields set after match finishes |
+| `matches` | Seeded from football-data.org; result + xG fields set after match finishes |
 | `predictions` | One row per (player, match); editable until `kickoff_at` |
 | `scoring_log` | Audit trail written after each match is scored |
-| `category_bets` | Stub table for future tournament-level bets module |
+| `category_bets` | Special bets: WORLD_CHAMPION, TOP_SCORER, group advance (one row per user+category) |
+| `category_results` | Correct answers for each category, set by admin |
+
+**Key columns added by later migrations:**
+- `profiles.telegram_chat_id` — set by player in /settings or admin in /admin/players
+- `matches.reminder_sent`, `matches.kickoff_msg_sent` — prevent double Telegram messages
+- `matches.af_fixture_id`, `matches.home_xg`, `matches.away_xg` — xG data from api-football.com
 
 **To mark yourself as admin** (run once in Supabase SQL editor after first login):
 ```sql
@@ -84,40 +98,53 @@ app/
   page.tsx                # Redirect → /login or /leaderboard
   login/page.tsx          # Magic link form (Finnish)
   auth/callback/route.ts  # Supabase magic link callback
-  leaderboard/page.tsx    # Points leaderboard
-  matches/page.tsx        # Fixture list + prediction entry (Phase 2)
+  leaderboard/page.tsx    # Points leaderboard (match pts + category bonus)
+  matches/page.tsx        # Fixture list + prediction entry
   my-predictions/page.tsx # Player's own predictions + points
+  bets/page.tsx           # Special bets: champion, top scorer, group advance
+  settings/page.tsx       # Player self-service: display name + Telegram chat ID
   admin/
     layout.tsx            # Guards: redirect non-admins to /leaderboard
     page.tsx              # Admin dashboard links
     seed/page.tsx         # Import matches from football-data.org
-    matches/page.tsx      # Manual result override (Phase 3)
-    players/page.tsx      # Invite players, view stats
+    matches/page.tsx      # Manual result override (also auto-fetches xG)
+    players/page.tsx      # Invite players, set telegram_chat_id
+    categories/page.tsx   # Score special bets (champion, scorer, group advance)
 
 components/
-  Nav.tsx                 # Sticky top nav with sign-out
+  Nav.tsx                 # Sticky top nav; ⚙ settings icon next to sign-out
+  MatchCard.tsx           # Match display with prediction form / locked / result
+  PredictionForm.tsx      # Score input (home : away), optimistic save
+  CountdownTimer.tsx      # Client component, updates every 30s
 
 lib/
   supabase/
     client.ts             # createBrowserClient (client components)
     server.ts             # createServerClient + createServiceRoleClient (server)
-  football-data/client.ts # Typed wrapper: fetchMatches(), fetchMatch()
+  football-data/client.ts # fetchMatches(), fetchMatch()
+  api-football/client.ts  # findAfFixtureId(), fetchFixtureXg() — xG from api-sports.io
   telegram/
-    bot.ts              # sendMessage(), sendPhoto(), getQuickChartUrl() — raw HTTP
-    notify.ts           # sendKickoffMessage(), sendResultMessage(), sendReminderDM(),
-                        # sendStatsTable(), sendChartImage() — Phase 4
-  scoring/engine.ts       # calculatePoints() — Phase 3
+    bot.ts                # sendMessage(), sendPhoto(), sendPhotoBuffer(), getQuickChartUrl()
+    notify.ts             # sendKickoffMessage(), sendResultMessage(), sendReminderDM(),
+                          # sendStatsTable() (QuickChart table image), sendChartImage()
+  scoring/engine.ts       # calculatePoints() — pure function, unit-tested
+  players.ts              # TOP_SCORER_PLAYERS list (50 players), wildcard helpers
+  countries.ts            # getCountry(), flagUrl(), groupLabel() (Group X → Ryhmä X)
   utils.ts                # formatDate (Finnish), stageLabel(), resultLabel()
 
 app/api/
-  predictions/route.ts            # GET + POST predictions — Phase 2
+  predictions/route.ts            # GET + POST predictions
+  category-bets/route.ts          # GET + POST special bets (deadline enforced server-side)
   admin/seed-matches/route.ts     # POST: import from football-data.org
-  admin/override-result/route.ts  # POST: set result + score + notify — Phase 3
+  admin/override-result/route.ts  # POST: set result + score + fetch xG + notify Telegram
+  admin/score-categories/route.ts # POST: set category result + score all bets
   admin/invite-player/route.ts    # POST: send magic link invite
   telegram/
-    webhook/route.ts              # Telegram bot webhook — /start, /chart, /stats
+    webhook/route.ts              # Telegram bot webhook — /start, /chart, /stats, /help
 
 proxy.ts                # Next.js proxy (was: middleware): session refresh + auth redirect
+                        # Excludes /api/ routes so Telegram webhook isn't redirected to /login
+
 supabase/
   migrations/
     0001_initial_schema.sql
@@ -125,9 +152,14 @@ supabase/
     0003_triggers.sql
     0004_matches_admin_policies.sql
     0005_telegram_fields.sql      # telegram_chat_id on profiles; reminder_sent/kickoff_msg_sent on matches
+    0006_onboarded.sql
+    0007_leaderboard_rls.sql
+    0008_category_bets.sql        # category_bets + category_results tables + RLS
+    0009_xg_columns.sql           # af_fixture_id, home_xg, away_xg on matches
   functions/
-    poll-match-results/index.ts      # Deno: polls football-data.org, scores, sends result message
+    poll-match-results/index.ts      # Deno: polls football-data.org, scores, fetches xG, sends result message
     check-upcoming-matches/index.ts  # Deno: sends reminder DMs + kickoff group message
+
 types/
   database.ts            # Hand-written types (replace with supabase gen types)
 ```
@@ -142,22 +174,38 @@ types/
 
 Competition code: `WC`. Auth header: `X-Auth-Token`.
 
-## Telegram Message Format
+## api-football.com (xG)
 
-Sent after every confirmed result (HTML parse mode):
-```
-<b>Ottelu: Ranska - Saksa</b>
-<b>Tulos: 2 - 1</b>
+Base URL: `https://v3.football.api-sports.io`. Auth header: `x-apisports-key`.
+World Cup league ID: **1**, season: **2026**.
 
-<b>Pisteet tästä ottelusta:</b>
-Matti Meikäläinen — 5 pts
-Teppo Testaaja — 3 pts
-...muut — 0 pts
+| Purpose | Endpoint | When called |
+|---|---|---|
+| Find fixture ID | `GET /fixtures?league=1&season=2026&date=YYYY-MM-DD` | On first score of a match |
+| Fetch xG | `GET /fixtures/statistics?fixture={af_fixture_id}` | On score (cached after first fetch) |
 
-<b>Sarjataulukko (top 5):</b>
-1. Matti Meikäläinen — 42 pts
-2. Teppo Testaaja — 38 pts
-```
+Free tier: 100 req/day — sufficient (1 lookup + 1 stats call per match, ~64 matches total).
+
+## Telegram Bot
+
+Bot: `@veikkaajat_apumarko_bot`
+
+**Automatic messages:**
+- 🔔 Kickoff message (group): shows all predictions when match starts
+- ⚽ Result message (group): result, per-player points, leaderboard with ↑↓→ arrows
+- ⏰ Reminder DM: sent 30 min before kickoff (or at 22:00 Helsinki for matches starting 23:00–05:00)
+
+**Commands (group):**
+- `/chart` — cumulative points line chart image (QuickChart.io)
+- `/stats` — full stats table image: pts, KA, exact scores, correct result %, zero-match %, group/knockout avg, draw/decisive accuracy %, days in lead, xG-pts (when available), champion/scorer picks (after deadline)
+- `/help` — lists commands
+
+**Commands (DM):**
+- `/start` — bot replies with the user's Telegram chat ID
+
+**Day-in-lead counting:** grouped by Helsinki calendar day with 10:00 Helsinki cutoff (UTC−7 shift), so US late-night matches fall under the correct gameday.
+
+**Special bet picks** in `/stats` are hidden until the first match has kicked off (betting deadline).
 
 ## Build & Run
 
@@ -173,187 +221,53 @@ npm test           # vitest unit tests
 ## Build Progress
 
 ### ✅ Phase 0 — Scaffolding + Auth
-**Status: Complete**
-
-- Next.js 16 project with TypeScript, Tailwind CSS
-- Supabase client wrappers (`lib/supabase/client.ts`, `server.ts`)
-- Session refresh proxy (`proxy.ts`)
-- Magic link login page (`/login`)
-- Auth callback handler (`/auth/callback`)
+- Next.js 16 + TypeScript + Tailwind CSS
+- Supabase client wrappers, session refresh proxy, magic link login, auth callback
 - Auto-create profile trigger on first login
-- All 3 SQL migrations written
-
-**Verify:** Log in via magic link → land on `/leaderboard`. Non-admin hitting `/admin` is redirected.
-
----
 
 ### ✅ Phase 1 — Match Seeding + Admin Foundation
-**Status: Complete**
-
 - `lib/football-data/client.ts` — `fetchMatches()`, `fetchMatch()`
-- `lib/utils.ts` — `formatDate()`, `stageLabel()`, `resultLabel()`
-- `POST /api/admin/seed-matches` — imports matches from football-data.org (upsert on `external_id`)
-- `POST /api/admin/invite-player` — sends magic link + creates profile
-- `/admin` dashboard, `/admin/seed`, `/admin/players` pages
-- `/matches` fixture list (grouped by stage, shows result badges)
-- `/leaderboard` page (aggregates `predictions.points`)
-- `/my-predictions` page (player's own history)
-- `Nav` component (sticky, shows admin link for admins)
-
-**Verify:**
-1. Log in → mark self as admin in Supabase SQL editor
-2. Admin → Tuo ottelut → "Lohkovaihe" → 48 matches imported
-3. `/matches` shows all fixtures grouped by stage
-4. Admin → Pelaajat → invite a player → magic link email arrives
-
----
+- `POST /api/admin/seed-matches` — upsert on `external_id`
+- `POST /api/admin/invite-player`
+- `/admin`, `/admin/seed`, `/admin/players`, `/matches`, `/leaderboard`, `/my-predictions`
 
 ### ✅ Phase 2 — Predictions
-**Status: Complete**
-
-- `app/api/predictions/route.ts` — GET + POST; server-side kickoff guard rejects edits after `kickoff_at`
-- `components/PredictionForm.tsx` — score input (home : away), optimistic save feedback
-- `components/CountdownTimer.tsx` — client component, updates every 30s
-- `components/MatchCard.tsx` — match display with prediction form (pre-kickoff), locked view (post-kickoff), result + points (finished)
-- `app/matches/page.tsx` — loads matches + user predictions in parallel, renders MatchCards
-
-**Verify:**
-1. `/matches` shows all matches with inline prediction form for future matches
-2. Submit a prediction → "✓" confirmation, DB updated
-3. Edit prediction → updates existing row
-4. Past match shows locked prediction, no form
-
----
+- `POST /api/predictions` with server-side kickoff guard
+- `MatchCard`, `PredictionForm`, `CountdownTimer` components
+- `/matches` page with inline prediction forms
 
 ### ✅ Phase 3 — Scoring + Leaderboard
-**Goal:** Admin confirms result; points calculated; leaderboard updates.
-
-**Status: Complete**
-
-- `lib/scoring/engine.ts` — `calculatePoints()` pure function; scores full-time only (extra time/pens ignored for knockout matches)
-- `lib/scoring/engine.test.ts` — 9 unit tests covering all point combinations (0–5 pts), all pass
-- `app/api/admin/override-result/route.ts` — sets match score, scores all predictions, inserts scoring_log
-- `app/admin/matches/page.tsx` — filterable match list with inline result override form
-
-**Verify:**
-1. Admin → Tulokset → set a result → "✓ N veikkausta pisteytetty"
-2. `/leaderboard` shows updated points
-3. `/matches` shows result + player's points on that match
-4. `/my-predictions` shows points per match
-
----
+- `lib/scoring/engine.ts` — `calculatePoints()`, unit-tested
+- `POST /api/admin/override-result` — scores all players, replaces scoring_log (no stacking)
+- `/admin/matches` result override page
 
 ### ✅ Phase 4 — Telegram Bot
-**Status: Complete**
+- Kickoff messages, result messages with leaderboard arrows, reminder DMs
+- `/chart`, `/stats` (QuickChart table image), `/help`, `/start` commands
+- Webhook at `/api/telegram/webhook` (excludes /api/ from auth redirect in proxy.ts)
+- Players self-register Telegram ID via `/settings` page
 
-**What it does:**
-- **Kickoff message** (group): when match kicks off, shows all predictions + who didn't predict
-- **Result message** (group): after scoring, shows result, predictions with points, leaderboard with position arrows (↑↓→)
-- **Reminder DMs**: sent 30 min before kickoff (or at 22:00 Helsinki if match starts 23:00–05:00) to players who haven't predicted
-- **`/chart`** (group command): sends cumulative points line chart image via QuickChart.io
-- **`/stats`** (group command): sends monospace stats table (pts, avg, exact scores, correct result %)
-- **`/start`** (DM to bot): bot replies with the player's Telegram chat ID for admin to register
+### ✅ Phase 4b — Special Bets
+- `category_bets` + `category_results` tables (migration 0008)
+- `/bets` page: World Champion, Top Scorer (50 players + all-country wildcards), group advance
+- `/admin/categories` page for admin scoring
+- Deadline enforced server-side (first match kickoff for champion/scorer, group's first match for group bets)
+- Category bonus included in leaderboard totals and `/stats`
 
-**New files:**
-- `lib/telegram/bot.ts` — raw HTTP helpers
-- `lib/telegram/notify.ts` — application-level message functions
-- `app/api/telegram/webhook/route.ts` — bot update handler
-- `supabase/functions/check-upcoming-matches/index.ts` — Deno, every 5 min
-- `supabase/functions/poll-match-results/index.ts` — Deno, every 30 min (also scores + notifies)
-
-**New DB columns (migration 0005):**
-- `profiles.telegram_chat_id` — TEXT nullable, set by admin in Players page
-- `matches.reminder_sent` — BOOLEAN, prevents double reminders
-- `matches.kickoff_msg_sent` — BOOLEAN, prevents double kickoff messages
-
-**Setup steps:**
-
-1. **Create bot**: message @BotFather on Telegram → `/newbot` → copy the token
-2. **Add bot to group**: invite it, make it an admin so it can send messages
-3. **Get group chat_id**: send a message in the group, then open `https://api.telegram.org/bot<TOKEN>/getUpdates` — look for `message.chat.id` (negative number for groups)
-4. **Set env vars** in Vercel dashboard:
-   ```
-   TELEGRAM_BOT_TOKEN=<token>
-   TELEGRAM_GROUP_CHAT_ID=<negative-number>
-   TELEGRAM_WEBHOOK_SECRET=<any-random-string>
-   ```
-5. **Register webhook** (run once after deploying):
-   ```
-   curl -X POST "https://api.telegram.org/bot<TOKEN>/setWebhook" \
-     -d "url=https://<your-app>.vercel.app/api/telegram/webhook" \
-     -d "secret_token=<TELEGRAM_WEBHOOK_SECRET>"
-   ```
-6. **Run migration 0005** in Supabase SQL editor
-7. **Register players**: each player DMs `/start` to the bot → copies their chat ID → admin enters it in Admin → Pelaajat page
-
-**Bot commands available in the group:**
-- `/chart` — sends line chart image
-- `/stats` — sends stats table
-- `/help` — lists commands
-
----
-
-### 🔲 Phase 5 — Automated Polling
-**Goal:** Results polled and kickoff/reminder messages sent automatically.
-
-**Files:** already created in Phase 4 (both edge functions are complete).
-
-**Setup steps:**
-1. Enable `pg_cron` + `pg_net` extensions in Supabase dashboard (Database → Extensions)
-2. Install Supabase CLI and authenticate: `supabase login`
-3. Link project: `supabase link --project-ref <ref>`
-4. Set edge function secrets:
-   ```
-   supabase secrets set FOOTBALL_DATA_API_KEY=...
-   supabase secrets set TELEGRAM_BOT_TOKEN=...
-   supabase secrets set TELEGRAM_GROUP_CHAT_ID=...
-   supabase secrets set NEXT_PUBLIC_APP_URL=https://...
-   ```
-5. Deploy both functions:
-   ```
-   supabase functions deploy poll-match-results
-   supabase functions deploy check-upcoming-matches
-   ```
-6. Register cron jobs in Supabase SQL editor:
-   ```sql
-   -- Poll results every 30 min
-   select cron.schedule(
-     'poll-match-results', '*/30 * * * *',
-     $$ select net.http_post(
-       url := 'https://<ref>.supabase.co/functions/v1/poll-match-results',
-       headers := '{"Authorization": "Bearer <ANON_KEY>"}'::jsonb,
-       body := '{}'::jsonb
-     ) $$
-   );
-
-   -- Check upcoming matches every 5 min
-   select cron.schedule(
-     'check-upcoming-matches', '*/5 * * * *',
-     $$ select net.http_post(
-       url := 'https://<ref>.supabase.co/functions/v1/check-upcoming-matches',
-       headers := '{"Authorization": "Bearer <ANON_KEY>"}'::jsonb,
-       body := '{}'::jsonb
-     ) $$
-   );
-   ```
-
-Done when: `select * from cron.job_run_details order by start_time desc limit 10;` shows successful runs.
-
----
+### ✅ Phase 5 — Automated Polling
+- `poll-match-results` edge function: runs every 30 min, polls football-data.org, scores predictions, fetches xG, sends Telegram result message
+- `check-upcoming-matches` edge function: runs every 5 min, sends reminder DMs and kickoff messages
+- pg_cron jobs registered in Supabase
+- xG fetched from api-football.com and stored on match row (`af_fixture_id` cached)
 
 ### 🔲 Phase 6 — UI Polish
-**Goal:** Mobile-friendly, all-Finnish, edge cases handled.
-
 - Responsive pass on all pages
 - Finnish copy audit
 - Loading states + error boundaries
 - Postponed/cancelled match badges
 - Favicon + meta tags
 
----
-
 ### 🔲 Phase 7 — Knockout Rounds (during tournament)
-**Goal:** Add bracket rounds as they're confirmed.
-
-- Admin re-runs "Tuo ottelut" per stage — safe to repeat (upserts on `external_id`)
-- football-data.org uses TBD placeholders until bracket is set; verify team names after
+- Admin re-runs "Tuo ottelut" per stage (ROUND_OF_16, QUARTER_FINALS, SEMI_FINALS, FINAL)
+- Safe to repeat — upserts on `external_id`
+- Verify team names once bracket is confirmed (football-data.org uses TBD placeholders until then)
