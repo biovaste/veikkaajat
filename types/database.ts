@@ -28,6 +28,7 @@ export interface Database {
           is_admin?: boolean
           created_at?: string
         }
+        Relationships: []
       }
       matches: {
         Row: {
@@ -75,6 +76,7 @@ export interface Database {
           result_confirmed_at?: string | null
           created_at?: string
         }
+        Relationships: []
       }
       predictions: {
         Row: {
@@ -107,6 +109,22 @@ export interface Database {
           created_at?: string
           updated_at?: string
         }
+        Relationships: [
+          {
+            foreignKeyName: "predictions_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "predictions_match_id_fkey"
+            columns: ["match_id"]
+            isOneToOne: false
+            referencedRelation: "matches"
+            referencedColumns: ["id"]
+          }
+        ]
       }
       scoring_log: {
         Row: {
@@ -133,6 +151,7 @@ export interface Database {
           breakdown?: Json
           scored_at?: string
         }
+        Relationships: []
       }
       category_bets: {
         Row: {
@@ -159,10 +178,11 @@ export interface Database {
           points?: number | null
           created_at?: string
         }
+        Relationships: []
       }
     }
-    Views: Record<string, never>
-    Functions: Record<string, never>
-    Enums: Record<string, never>
+    Views: { [_ in never]: never }
+    Functions: { [_ in never]: never }
+    Enums: { [_ in never]: never }
   }
 }

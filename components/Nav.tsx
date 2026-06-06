@@ -1,0 +1,58 @@
+'use client'
+
+import Link from 'next/link'
+import { usePathname } from 'next/navigation'
+import { createClient } from '@/lib/supabase/client'
+import { useRouter } from 'next/navigation'
+
+interface NavProps {
+  isAdmin: boolean
+}
+
+export default function Nav({ isAdmin }: NavProps) {
+  const pathname = usePathname()
+  const router = useRouter()
+  const supabase = createClient()
+
+  async function signOut() {
+    await supabase.auth.signOut()
+    router.push('/login')
+  }
+
+  const links = [
+    { href: '/leaderboard', label: 'Pisteet' },
+    { href: '/matches', label: 'Ottelut' },
+    { href: '/my-predictions', label: 'Veikkaukseni' },
+    ...(isAdmin ? [{ href: '/admin', label: 'Admin' }] : []),
+  ]
+
+  return (
+    <nav className="bg-white border-b border-gray-200 sticky top-0 z-10">
+      <div className="max-w-2xl mx-auto px-4">
+        <div className="flex items-center justify-between h-12">
+          <div className="flex items-center gap-1">
+            {links.map((link) => (
+              <Link
+                key={link.href}
+                href={link.href}
+                className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+                  pathname.startsWith(link.href)
+                    ? 'bg-blue-600 text-white'
+                    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+                }`}
+              >
+                {link.label}
+              </Link>
+            ))}
+          </div>
+          <button
+            onClick={signOut}
+            className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            Kirjaudu ulos
+          </button>
+        </div>
+      </div>
+    </nav>
+  )
+}
