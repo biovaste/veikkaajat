@@ -319,21 +319,21 @@ export async function sendStatsTable(chatId?: number | string): Promise<void> {
   })
 
   // Build QuickChart table image URL
+  // QuickChart table type: https://quickchart.io/documentation/chart-types/table/
   const chartConfig = {
-    type: 'table' as const,
+    type: 'table',
     data: { head, body },
     options: {
-      title: { text: `MM 2026 — Tilastot (${scoredMatches} ottelua)` },
-      plugins: {
-        backgroundColor: '#1e293b',
-        fontColor: '#f1f5f9',
-        columnWidth: 50,
-      },
+      title: `MM 2026 — Tilastot — ${scoredMatches} ottelua`,
+      fontStyle: 'bold',
+      fontSize: 13,
     },
   }
 
   const encoded = encodeURIComponent(JSON.stringify(chartConfig))
-  const url = `https://quickchart.io/chart?w=900&h=${120 + sorted.length * 28}&c=${encoded}&backgroundColor=%231e293b`
+  const rowH = 26
+  const h = 60 + (sorted.length + 1) * rowH  // +1 for header row
+  const url = `https://quickchart.io/chart?w=960&h=${h}&c=${encoded}&backgroundColor=white`
 
   try {
     await sendPhoto(target, url, `📊 MM 2026 — Tilastot — ${scoredMatches} ottelua`)
