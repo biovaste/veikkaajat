@@ -168,5 +168,5 @@ export function flagUrl(code: string): string {
  */
 export function groupLabel(group: string | null | undefined): string | null {
   if (!group) return null
-  return group.replace(/^Group\s+/i, 'Lohko ')
+  return group.replace(/^Group\s+/i, 'Ryhmä ')
 }

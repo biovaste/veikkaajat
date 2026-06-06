@@ -112,13 +112,13 @@ export default function AdminCategoriesPage() {
       {/* Group advance scoring */}
       <div className="space-y-3">
         <div>
-          <h2 className="font-semibold">Lohkojen jatkajat</h2>
-          <p className="text-xs text-gray-400 mt-0.5">Valitse 2 jatkajaa per lohko ja pisteytä · 4 p per oikea joukkue</p>
+          <h2 className="font-semibold">Ryhmien jatkajat</h2>
+          <p className="text-xs text-gray-400 mt-0.5">Valitse 2 jatkajaa per ryhmä ja pisteytä · 4 p per oikea joukkue</p>
         </div>
 
         {sortedGroups.map(([group, info]) => {
           const picks = groupInputs[group] ?? []
-          const groupFi = group.replace('Group ', 'Lohko ')
+          const groupFi = group.replace('Group ', 'Ryhmä ')
 
           return (
             <div key={group} className="bg-white rounded-lg border border-gray-200 p-3 space-y-2">

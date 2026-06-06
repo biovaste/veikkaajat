@@ -254,8 +254,8 @@ export default function BetsPage() {
       {/* ── Group advance bets ── */}
       <div className="space-y-3">
         <div>
-          <h2 className="font-semibold">Lohkojen jatkajat</h2>
-          <p className="text-xs text-gray-400 mt-0.5">Valitse 2 joukkuetta per lohko jotka jatkavat · 4 pistettä per oikea</p>
+          <h2 className="font-semibold">Ryhmien jatkajat</h2>
+          <p className="text-xs text-gray-400 mt-0.5">Valitse 2 joukkuetta per ryhmä jotka jatkavat · 4 pistettä per oikea</p>
         </div>
 
         {sortedGroups.map(([group, info]) => {
@@ -264,7 +264,7 @@ export default function BetsPage() {
           const groupPoints = data.points[group]
           const groupResult = data.results[group]
           const resultTeams: string[] = groupResult ? JSON.parse(groupResult) : []
-          const groupFi = group.replace('Group ', 'Lohko ')
+          const groupFi = group.replace('Group ', 'Ryhmä ')
           const remaining = 2 - picks.length
 
           return (
