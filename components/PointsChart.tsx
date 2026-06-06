@@ -25,7 +25,7 @@ const COLOURS = [
 ]
 
 export default function PointsChart({ data, players }: Props) {
-  if (data.length === 0) return null
+  if (data.length === 0 && players.length === 0) return null
 
   return (
     <div className="bg-white rounded-lg border border-gray-200 p-4">

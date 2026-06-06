@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { getCountry, flagUrl } from '@/lib/countries'
-import { TOP_SCORER_PLAYERS, getPlayerCountries, wildcardValue, isWildcard, wildcardCountry } from '@/lib/players'
+import { TOP_SCORER_PLAYERS, wildcardValue, isWildcard, wildcardCountry } from '@/lib/players'
 import { useRouter } from 'next/navigation'
 
 interface GroupInfo {
@@ -332,9 +332,12 @@ export default function BetsPage() {
                   {/* Players grouped by country */}
                   {(() => {
                     const q = scorerSearch.trim().toLowerCase()
-                    // Build country groups preserving sorted order from players.ts
-                    const countries = getPlayerCountries()
-                    const groups = countries.map(country => {
+                    // All tournament countries (from groups data), sorted by Finnish name
+                    const tournamentCountries = Array.from(
+                      new Set(Object.values(data.groups).flatMap(g => g.teams))
+                    ).sort((a, b) => getCountry(a).name.localeCompare(getCountry(b).name, 'fi'))
+
+                    const groups = tournamentCountries.map(country => {
                       const { name: countryFi, code } = getCountry(country)
                       const players = TOP_SCORER_PLAYERS.filter(p => p.country === country)
                       const matchesCountry = !q || countryFi.toLowerCase().includes(q)

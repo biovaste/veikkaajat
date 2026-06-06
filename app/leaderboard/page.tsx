@@ -227,10 +227,10 @@ export default async function LeaderboardPage() {
           </div>
 
           {/* ── Chart ── */}
-          {chartData.length > 0 && <PointsChart data={chartData} players={players} />}
+          <PointsChart data={chartData} players={players} />
 
           {/* ── Stats table ── */}
-          {scoredMatches > 0 && (
+          {(
             <div className="space-y-2">
               <h2 className="text-lg font-semibold">Tilastot</h2>
               <div className="bg-white rounded-lg border border-gray-200 overflow-x-auto">
