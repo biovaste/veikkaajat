@@ -51,10 +51,10 @@ export async function POST(request: NextRequest) {
       console.error('[webhook /stats]', err)
       await sendMessage(chatId, '⚠️ Tilastot ei onnistu juuri nyt.').catch(console.error)
     })
-  } else if (text === '/help' && isGroup) {
+  } else if (text === '/help') {
     await sendMessage(
       chatId,
-      '📋 <b>Komennot:</b>\n/chart — pistekehityskaavio\n/stats — tilastotaulukko\n\n' +
+      '📋 <b>Komennot (ryhmässä):</b>\n/chart — pistekehityskaavio\n/stats — tilastotaulukko\n\n' +
       'Veikkaa: ' + (process.env.NEXT_PUBLIC_APP_URL ?? ''),
     ).catch(console.error)
   }
