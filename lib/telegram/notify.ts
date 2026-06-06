@@ -160,7 +160,7 @@ export async function sendStatsTable(): Promise<void> {
     stats[p.id] = { display_name: p.display_name, total: 0, matches: 0, exact: 0, correct_result: 0 }
   }
 
-  for (const row of log) {
+  for (const row of log ?? []) {
     const s = stats[row.user_id]
     if (!s) continue
     s.total += row.points
@@ -208,7 +208,7 @@ export async function sendChartImage(): Promise<void> {
   const playerNames = new Set<string>()
   const byMatch: Record<number, { name: string; points: number }[]> = {}
 
-  for (const row of log) {
+  for (const row of log ?? []) {
     const name = (Array.isArray(row.profiles) ? row.profiles[0] : row.profiles)?.display_name
     if (!name) continue
     playerNames.add(name)
