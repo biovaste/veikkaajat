@@ -131,16 +131,12 @@ export async function sendStatsTable(chatId?: number | string): Promise<void> {
   const target = String(chatId ?? GROUP_CHAT_ID)
   const admin = createServiceRoleClient()
 
-  // Total points and breakdown from scoring_log
-  const { data: log } = await admin
-    .from('scoring_log')
-    .select('user_id, points, breakdown')
-
-  // All profiles
-  const { data: profiles } = await admin
-    .from('profiles')
-    .select('id, display_name')
-    .order('display_name')
+  // Fetch all data in parallel
+  const [{ data: log }, { data: profiles }, { data: catBets }] = await Promise.all([
+    admin.from('scoring_log').select('user_id, points, breakdown'),
+    admin.from('profiles').select('id, display_name').order('display_name'),
+    admin.from('category_bets').select('user_id, points').not('points', 'is', null),
+  ])
 
   if (!profiles) {
     await sendMessage(target, '⚠️ Tilastoja ei saatavilla.')
@@ -151,6 +147,7 @@ export async function sendStatsTable(chatId?: number | string): Promise<void> {
   type Stats = {
     display_name: string
     total: number
+    bonus: number  // category bet points
     matches: number
     exact: number
     correct_result: number
@@ -158,7 +155,7 @@ export async function sendStatsTable(chatId?: number | string): Promise<void> {
   const stats: Record<string, Stats> = {}
 
   for (const p of profiles) {
-    stats[p.id] = { display_name: p.display_name, total: 0, matches: 0, exact: 0, correct_result: 0 }
+    stats[p.id] = { display_name: p.display_name, total: 0, bonus: 0, matches: 0, exact: 0, correct_result: 0 }
   }
 
   for (const row of log ?? []) {
@@ -171,19 +168,30 @@ export async function sendStatsTable(chatId?: number | string): Promise<void> {
     if (b.result === 3) s.correct_result += 1
   }
 
+  for (const row of catBets ?? []) {
+    const s = stats[row.user_id]
+    if (!s || row.points === null) continue
+    s.total += row.points
+    s.bonus += row.points
+  }
+
   const sorted = Object.values(stats).sort((a, b) => b.total - a.total)
-  const playedCount = (log ?? []).length > 0 ? new Set((log ?? []).map((r) => r.user_id)).size : 0
+  const scoredMatches = Math.max(...Object.values(stats).map(s => s.matches), 0)
+  const hasBonus = (catBets ?? []).length > 0
 
   // Format as monospace table
-  const scoredMatches = sorted[0]?.matches ?? 0
   const header = `📊 <b>Tilastot — ${scoredMatches} ottelua pisteytetty</b>\n\n`
-  const colHeader = padR('Pelaaja', 15) + padL('Pts', 4) + padL('KA', 5) + padL('Tark', 5) + padL('Mrk%', 5)
-  const separator = '─'.repeat(34)
+  const colHeader = hasBonus
+    ? padR('Pelaaja', 14) + padL('Pts', 4) + padL('Bon', 4) + padL('KA', 5) + padL('Tark', 5) + padL('Mrk%', 5)
+    : padR('Pelaaja', 15) + padL('Pts', 4) + padL('KA', 5) + padL('Tark', 5) + padL('Mrk%', 5)
+  const separator = '─'.repeat(hasBonus ? 37 : 34)
 
   const rows = sorted.map((s) => {
     const avg = s.matches > 0 ? (s.total / s.matches).toFixed(1) : '–'
     const merkki = s.matches > 0 ? Math.round((s.correct_result / s.matches) * 100) + '%' : '–'
-    return padR(truncate(s.display_name, 14), 15) + padL(String(s.total), 4) + padL(avg, 5) + padL(String(s.exact), 5) + padL(merkki, 5)
+    return hasBonus
+      ? padR(truncate(s.display_name, 13), 14) + padL(String(s.total), 4) + padL(String(s.bonus), 4) + padL(avg, 5) + padL(String(s.exact), 5) + padL(merkki, 5)
+      : padR(truncate(s.display_name, 14), 15) + padL(String(s.total), 4) + padL(avg, 5) + padL(String(s.exact), 5) + padL(merkki, 5)
   })
 
   const body = `<code>${colHeader}\n${separator}\n${rows.join('\n')}</code>`
