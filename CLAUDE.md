@@ -47,7 +47,7 @@ Scoring engine: `lib/scoring/engine.ts` — pure function, unit-tested.
 
 ## Key Architectural Decisions
 
-- **Admin check**: use `createServerClient()` (anon key, has session) to verify `auth.getUser()` and `profiles.is_admin`. Use `createServiceRoleClient()` only for the actual privileged DB/auth operations. Do NOT use the service role client for `auth.getUser()` — it has `persistSession: false` and won't read the cookie session. Admin pages use the admin layout which server-side checks `profiles.is_admin`. The proxy (`proxy.ts`) does not check admin status — it only handles session refresh and unauthenticated redirects.
+- **Admin check**: use `createServerClient()` (anon key + cookie session) to verify `auth.getUser()` and `profiles.is_admin`. Use `createServiceRoleClient()` only for privileged DB/auth operations. `createServiceRoleClient()` uses `@supabase/supabase-js` `createClient` directly (no cookies) — this is intentional. Using `@supabase/ssr`'s `createServerClient` with the service role key does NOT bypass RLS because the SSR client overrides the API key with the user's session JWT for REST requests. Admin pages use the admin layout which server-side checks `profiles.is_admin`. The proxy (`proxy.ts`) does not check admin status — it only handles session refresh and unauthenticated redirects.
 - **Kickoff lock**: enforced both client-side (hide form) and server-side (`POST /api/predictions` rejects if `kickoff_at <= now()`).
 - **No open signup**: admin uses `/admin/players` to invite users via `supabase.auth.admin.inviteUserByEmail()`.
 - **football-data.org rate limit**: 10 req/min. Group stage seed is one bulk call. The edge function polls one match at a time with a 7s sleep between calls.

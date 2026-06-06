@@ -18,7 +18,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'email ja display_name vaaditaan' }, { status: 400 })
   }
 
-  const admin = await createServiceRoleClient()
+  const admin = createServiceRoleClient()
 
   const { data: invited, error: inviteError } = await admin.auth.admin.inviteUserByEmail(email, {
     data: { display_name },
