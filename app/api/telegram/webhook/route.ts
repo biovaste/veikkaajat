@@ -31,13 +31,12 @@ export async function POST(request: NextRequest) {
   if (!msg?.text || !msg.from) return NextResponse.json({ ok: true })
 
   const chatId = msg.chat.id
-  const text = msg.text.trim()
+  // Strip bot username suffix: "/help@veikkaajat_apumarko_bot" → "/help"
+  const text = msg.text.trim().split('@')[0].toLowerCase()
   const isGroup = msg.chat.type === 'group' || msg.chat.type === 'supergroup'
-  const isPrivate = msg.chat.type === 'private'
 
   try {
     if (text.startsWith('/start')) {
-      // Register: reply with chat ID so admin can link the account
       const reply =
         `Moi! 👋\n\n` +
         `Chat ID-si on: <code>${chatId}</code>\n\n` +
