@@ -134,7 +134,7 @@ export async function sendStatsTable(chatId?: number | string): Promise<void> {
   const admin = createServiceRoleClient()
 
   const [{ data: log }, { data: profiles }, { data: catBets }, { data: preds }] = await Promise.all([
-    admin.from('scoring_log').select('user_id, points, breakdown, match_id, matches(stage)'),
+    admin.from('scoring_log').select('user_id, points, breakdown, match_id, matches(stage, kickoff_at)').order('match_id', { ascending: true }),
     admin.from('profiles').select('id, display_name').order('display_name'),
     admin.from('category_bets').select('user_id, category, bet_value, points'),
     admin.from('predictions').select('user_id, home_score_pred, away_score_pred, matches(home_score, away_score, status)'),
@@ -157,6 +157,7 @@ export async function sendStatsTable(chatId?: number | string): Promise<void> {
     knockout_pts: number; knockout_n: number
     draw_preds: number; draw_correct: number
     decisive_preds: number; decisive_correct: number
+    lead_count: number
     champion_bet: string | null
     scorer_bet: string | null
   }
@@ -168,6 +169,7 @@ export async function sendStatsTable(chatId?: number | string): Promise<void> {
       exact: 0, correct_result: 0, zero_matches: 0,
       group_pts: 0, group_n: 0, knockout_pts: 0, knockout_n: 0,
       draw_preds: 0, draw_correct: 0, decisive_preds: 0, decisive_correct: 0,
+      lead_count: 0,
       champion_bet: null, scorer_bet: null,
     }
   }
@@ -185,6 +187,33 @@ export async function sendStatsTable(chatId?: number | string): Promise<void> {
     const stage = (Array.isArray(row.matches) ? row.matches[0] : row.matches)?.stage
     if (stage === 'GROUP_STAGE') { s.group_pts += row.points; s.group_n += 1 }
     else if (stage) { s.knockout_pts += row.points; s.knockout_n += 1 }
+  }
+
+  // Leadership: replay standings after each match (log already ordered by match_id asc)
+  // Group rows by match_id, then walk in kickoff order
+  {
+    const byMatch: Map<number, { user_id: string; points: number }[]> = new Map()
+    const matchOrder: { match_id: number; kickoff_at: string }[] = []
+    for (const row of log ?? []) {
+      if (!byMatch.has(row.match_id)) {
+        byMatch.set(row.match_id, [])
+        const m = Array.isArray(row.matches) ? row.matches[0] : row.matches
+        matchOrder.push({ match_id: row.match_id, kickoff_at: m?.kickoff_at ?? '' })
+      }
+      byMatch.get(row.match_id)!.push({ user_id: row.user_id, points: row.points })
+    }
+    matchOrder.sort((a, b) => a.kickoff_at.localeCompare(b.kickoff_at))
+
+    const running: Record<string, number> = {}
+    for (const { match_id } of matchOrder) {
+      for (const { user_id, points } of byMatch.get(match_id) ?? []) {
+        running[user_id] = (running[user_id] ?? 0) + points
+      }
+      const maxPts = Math.max(...Object.values(running))
+      for (const [uid, pts] of Object.entries(running)) {
+        if (pts === maxPts && stats[uid]) stats[uid].lead_count++
+      }
+    }
   }
 
   // Category bets
@@ -226,17 +255,18 @@ export async function sendStatsTable(chatId?: number | string): Promise<void> {
 
   // ── Message 2: Advanced stats ─────────────────────────────────────────────
   const h2 = `📈 <b>Lisätilastot</b>\n\n`
-  const c2 = padR('Pelaaja', 13) + padL('Nol%', 5) + padL('L-KA', 5) + padL('J-KA', 5) + padL('Tas%', 5) + padL('Ylä%', 5)
+  const c2 = padR('Pelaaja', 13) + padL('Nol%', 5) + padL('L-KA', 5) + padL('J-KA', 5) + padL('Tas%', 5) + padL('Ylä%', 5) + padL('Jht', 4)
   const r2 = sorted.map(s =>
     padR(truncate(s.display_name, 12), 13) +
     padL(pct(s.zero_matches, s.matches), 5) +
     padL(avg(s.group_pts, s.group_n), 5) +
     padL(avg(s.knockout_pts, s.knockout_n), 5) +
     padL(pct(s.draw_correct, s.draw_preds), 5) +
-    padL(pct(s.decisive_correct, s.decisive_preds), 5)
+    padL(pct(s.decisive_correct, s.decisive_preds), 5) +
+    padL(String(s.lead_count), 4)
   )
-  const legend2 = '\n\n<i>Nol%=nollaottelut, L-KA=lohkovaihe KA, J-KA=jatkopelit KA\nTas%=tasurihakujen osuma, Ylä%=voittohakujen osuma</i>'
-  await sendMessage(target, h2 + `<code>${c2}\n${'─'.repeat(38)}\n${r2.join('\n')}</code>` + legend2)
+  const legend2 = '\n\n<i>Nol%=nollaottelut, L-KA=lohkovaihe KA, J-KA=jatkopelit KA\nTas%=tasurihakujen osuma, Ylä%=voittohakujen osuma, Jht=johtohetket</i>'
+  await sendMessage(target, h2 + `<code>${c2}\n${'─'.repeat(42)}\n${r2.join('\n')}</code>` + legend2)
 
   // ── Message 3: Special bets ───────────────────────────────────────────────
   const hasBets = sorted.some(s => s.champion_bet || s.scorer_bet)
