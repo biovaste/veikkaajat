@@ -24,7 +24,6 @@ export default function Nav({ isAdmin }: NavProps) {
     { href: '/matches', label: 'Ottelut', short: 'Ottelut' },
     { href: '/my-predictions', label: 'Veikkaukseni', short: 'Omat' },
     { href: '/bets', label: 'Erikoisveikkaukset', short: 'Bonus' },
-    { href: '/settings', label: 'Asetukset', short: '⚙' },
     ...(isAdmin ? [{ href: '/admin', label: 'Admin', short: 'Admin' }] : []),
   ]
 
@@ -48,12 +47,21 @@ export default function Nav({ isAdmin }: NavProps) {
               </Link>
             ))}
           </div>
-          <button
-            onClick={signOut}
-            className="ml-2 text-xs text-gray-400 hover:text-gray-600 transition-colors whitespace-nowrap shrink-0"
-          >
-            Ulos
-          </button>
+          <div className="ml-2 flex items-center gap-2 shrink-0">
+            <Link
+              href="/settings"
+              className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
+              title="Asetukset"
+            >
+              ⚙
+            </Link>
+            <button
+              onClick={signOut}
+              className="text-xs text-gray-400 hover:text-gray-600 transition-colors whitespace-nowrap"
+            >
+              Ulos
+            </button>
+          </div>
         </div>
       </div>
     </nav>

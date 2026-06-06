@@ -293,7 +293,6 @@ export default function BetsPage() {
                 {info.teams.map(team => {
                   const isSelected = picks.includes(team)
                   const isCorrect = resultTeams.length > 0 ? resultTeams.includes(team) : null
-                  const showCorrect = isCorrect !== null ? (isSelected ? isCorrect : (isCorrect ? true : null)) : null
 
                   return (
                     <TeamButton
