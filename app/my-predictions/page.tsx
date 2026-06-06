@@ -1,7 +1,7 @@
 import { createServerClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { formatDate } from '@/lib/utils'
-import { getCountry } from '@/lib/countries'
+import { getCountry, flagUrl } from '@/lib/countries'
 
 export const revalidate = 0
 
@@ -40,8 +40,20 @@ export default async function MyPredictionsPage() {
       <div className="bg-white rounded-lg border border-gray-200 px-4 py-3">
         <div className="flex items-center justify-between gap-2">
           <div className="flex-1 min-w-0">
-            <div className="text-sm font-medium truncate">
-              {(() => { const h = getCountry(match.home_team); const a = getCountry(match.away_team); return <>{h.flag && <span className="mr-0.5">{h.flag}</span>}{h.name}<span className="text-gray-400 mx-1">–</span>{a.flag && <span className="mr-0.5">{a.flag}</span>}{a.name}</> })()}
+            <div className="text-sm font-medium flex items-center gap-1 flex-wrap">
+              {(() => {
+                const h = getCountry(match.home_team)
+                const a = getCountry(match.away_team)
+                return (
+                  <>
+                    {h.code && <img src={flagUrl(h.code)} alt={h.name} width={20} height={15} className="inline-block rounded-sm shrink-0" />}
+                    {h.name}
+                    <span className="text-gray-400">–</span>
+                    {a.code && <img src={flagUrl(a.code)} alt={a.name} width={20} height={15} className="inline-block rounded-sm shrink-0" />}
+                    {a.name}
+                  </>
+                )
+              })()}
             </div>
             <div className="text-xs text-gray-400 mt-0.5">{formatDate(match.kickoff_at)}</div>
           </div>

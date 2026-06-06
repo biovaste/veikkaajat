@@ -1,5 +1,5 @@
 import { formatDate } from '@/lib/utils'
-import { getCountry, groupLabel } from '@/lib/countries'
+import { getCountry, flagUrl, groupLabel } from '@/lib/countries'
 import CountdownTimer from './CountdownTimer'
 import PredictionForm from './PredictionForm'
 
@@ -25,14 +25,31 @@ interface Props {
   prediction?: Prediction
 }
 
+function TeamName({ englishName }: { englishName: string }) {
+  const { name, code } = getCountry(englishName)
+  return (
+    <span className="inline-flex items-center gap-1">
+      {code && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={flagUrl(code)}
+          alt={name}
+          width={20}
+          height={15}
+          className="inline-block rounded-sm shrink-0"
+          style={{ imageRendering: 'auto' }}
+        />
+      )}
+      {name}
+    </span>
+  )
+}
+
 export default function MatchCard({ match, prediction }: Props) {
   const kickoffPassed = new Date(match.kickoff_at) <= new Date()
   const hasResult = match.home_score !== null && match.away_score !== null
   const isPostponed = match.status === 'POSTPONED'
   const isCancelled = match.status === 'CANCELLED'
-
-  const home = getCountry(match.home_team)
-  const away = getCountry(match.away_team)
   const group = groupLabel(match.group_name)
 
   return (
@@ -40,12 +57,10 @@ export default function MatchCard({ match, prediction }: Props) {
       {/* Match header */}
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
-          <div className="font-medium text-sm">
-            {home.flag && <span className="mr-1">{home.flag}</span>}
-            {home.name}
-            <span className="text-gray-400 mx-1">–</span>
-            {away.flag && <span className="mr-1">{away.flag}</span>}
-            {away.name}
+          <div className="font-medium text-sm flex items-center gap-1 flex-wrap">
+            <TeamName englishName={match.home_team} />
+            <span className="text-gray-400">–</span>
+            <TeamName englishName={match.away_team} />
           </div>
           <div className="text-xs text-gray-400 mt-0.5">
             {formatDate(match.kickoff_at)}
