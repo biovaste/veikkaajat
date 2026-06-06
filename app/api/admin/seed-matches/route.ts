@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServiceRoleClient } from '@/lib/supabase/server'
+import { createServerClient, createServiceRoleClient } from '@/lib/supabase/server'
 import { fetchMatches, type MatchStage } from '@/lib/football-data/client'
 
 export async function POST(request: NextRequest) {
-  const supabase = await createServiceRoleClient()
-
+  const supabase = await createServerClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Ei oikeuksia' }, { status: 401 })
 
@@ -13,7 +12,6 @@ export async function POST(request: NextRequest) {
     .select('is_admin')
     .eq('id', user.id)
     .single()
-
   if (!profile?.is_admin) return NextResponse.json({ error: 'Ei oikeuksia' }, { status: 403 })
 
   const body = await request.json().catch(() => ({}))
@@ -32,7 +30,8 @@ export async function POST(request: NextRequest) {
     status: m.status,
   }))
 
-  const { error, count } = await supabase
+  const admin = await createServiceRoleClient()
+  const { error, count } = await admin
     .from('matches')
     .upsert(rows, { onConflict: 'external_id', count: 'exact' })
 
