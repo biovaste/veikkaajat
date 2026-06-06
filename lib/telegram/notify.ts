@@ -290,49 +290,16 @@ export async function sendStatsTable(chatId?: number | string): Promise<void> {
 
   const hasBets = !categoryBetsOpen && sorted.some(s => s.champion_bet || s.scorer_bet)
 
-  // Build table rows
-  const head = ['#', 'Pelaaja', 'Pts', 'KA', 'Tark', 'Mrk%', 'Nol%', 'L-KA', 'J-KA', 'Tas%', 'Ylä%', 'Jht',
-    ...(hasXg ? ['xG-Pts'] : []),
-    ...(hasBets ? ['Mestari', 'Maalikuningas'] : [])]
-
-  const body = sorted.map((s, i) => {
-    const champ = s.champion_bet ? getCountry(s.champion_bet).name : '–'
-    const scorer = s.scorer_bet
-      ? (isWildcard(s.scorer_bet) ? `Muu ${getCountry(wildcardCountry(s.scorer_bet)).name}` : s.scorer_bet)
-      : '–'
-    return [
-      String(i + 1),
-      s.display_name,
-      String(s.total),
-      avg(s.total - s.bonus, s.matches),
-      String(s.exact),
-      pct(s.correct_result, s.matches),
-      pct(s.zero_matches, s.matches),
-      avg(s.group_pts, s.group_n),
-      avg(s.knockout_pts, s.knockout_n),
-      pct(s.draw_correct, s.draw_preds),
-      pct(s.decisive_correct, s.decisive_preds),
-      String(s.lead_count),
-      ...(hasXg ? [String(s.xg_pts)] : []),
-      ...(hasBets ? [champ, scorer] : []),
-    ]
-  })
-
-  // Build QuickChart table image via POST (avoids URL length limits)
-  const rowH = 26
-  const h = 60 + (sorted.length + 1) * rowH
-  const chartConfig = { type: 'table', data: { head, body } }
-
-  try {
-    const url = await getQuickChartUrl(chartConfig, 960, h)
-    await sendPhotoBuffer(target, url, `📊 MM 2026 — Tilastot — ${scoredMatches} ottelua`)
-  } catch (err) {
-    console.error('[stats] image failed, falling back to text:', err)
-    const lines = sorted.map((s, i) =>
-      `${i + 1}. ${s.display_name} — ${s.total} p  KA ${avg(s.total - s.bonus, s.matches)}  Tark ${s.exact}  Mrk ${pct(s.correct_result, s.matches)}  Jht ${s.lead_count}`
-    )
-    await sendMessage(target, `📊 <b>MM 2026 — Tilastot — ${scoredMatches} ottelua</b>\n\n<code>${lines.join('\n')}</code>`)
-  }
+  // Text summary + link to full stats on /leaderboard
+  const lines = sorted.map((s, i) =>
+    `${i + 1}. ${s.display_name} — ${s.total} p  KA ${avg(s.total - s.bonus, s.matches)}  Tark ${s.exact}  Jht ${s.lead_count}`
+  )
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? ''
+  const text =
+    `📊 <b>MM 2026 — Tilastot — ${scoredMatches} ottelua</b>\n\n` +
+    `<code>${lines.join('\n')}</code>\n\n` +
+    `🔗 Kaikki tilastot: ${appUrl}/leaderboard`
+  await sendMessage(target, text)
 }
 
 // ─── Chart image ─────────────────────────────────────────────────────────────
