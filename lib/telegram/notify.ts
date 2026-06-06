@@ -171,7 +171,7 @@ export async function sendStatsTable(): Promise<void> {
   }
 
   const sorted = Object.values(stats).sort((a, b) => b.total - a.total)
-  const playedCount = log.length > 0 ? new Set(log.map((r) => r.user_id)).size : 0
+  const playedCount = (log ?? []).length > 0 ? new Set((log ?? []).map((r) => r.user_id)).size : 0
 
   // Format as monospace table
   const scoredMatches = log ? new Set(log.map(r => r.match_id)).size : 0
