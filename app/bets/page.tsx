@@ -175,7 +175,7 @@ export default function BetsPage() {
 
   // Total bonus points earned so far
   const totalBonus = Object.values(data.points).reduce<number>((sum, p) => sum + (p ?? 0), 0)
-  const maxBonus = 10 + sortedGroups.length * 8 // 10 for champion + 8 per group
+  const maxBonus = 10 + sortedGroups.length * 4 // 10 for champion + 4 per group
 
   return (
     <div className="space-y-6">
@@ -277,7 +277,7 @@ export default function BetsPage() {
                   )}
                   {groupPoints !== null && (
                     <span className={`text-xs font-bold ${groupPoints > 0 ? 'text-green-600' : 'text-gray-400'}`}>
-                      {groupPoints} / 8 p
+                      {groupPoints} / 4 p
                     </span>
                   )}
                 </div>

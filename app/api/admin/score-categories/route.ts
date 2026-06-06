@@ -37,13 +37,12 @@ export async function POST(request: NextRequest) {
     if (category === 'WORLD_CHAMPION') {
       points = bet.bet_value === correct_value ? 10 : 0
     } else {
-      // Group advance: 4 pts per correct team
+      // Group advance: 4 pts only if BOTH picked teams are correct
       try {
         const picked: string[] = JSON.parse(bet.bet_value)
         const correct: string[] = JSON.parse(correct_value)
-        for (const team of picked) {
-          if (correct.includes(team)) points += 4
-        }
+        const correctCount = picked.filter(t => correct.includes(t)).length
+        points = correctCount === 2 ? 4 : 0
       } catch {
         points = 0
       }
