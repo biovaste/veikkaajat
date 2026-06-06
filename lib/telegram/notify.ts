@@ -189,26 +189,34 @@ export async function sendStatsTable(chatId?: number | string): Promise<void> {
     else if (stage) { s.knockout_pts += row.points; s.knockout_n += 1 }
   }
 
-  // Leadership: replay standings after each match (log already ordered by match_id asc)
-  // Group rows by match_id, then walk in kickoff order
+  // Leadership: count calendar days (Helsinki, UTC+3) each player led at end of day
   {
-    const byMatch: Map<number, { user_id: string; points: number }[]> = new Map()
-    const matchOrder: { match_id: number; kickoff_at: string }[] = []
+    const byMatch: Map<number, { user_id: string; points: number; kickoff_at: string }[]> = new Map()
     for (const row of log ?? []) {
-      if (!byMatch.has(row.match_id)) {
-        byMatch.set(row.match_id, [])
-        const m = Array.isArray(row.matches) ? row.matches[0] : row.matches
-        matchOrder.push({ match_id: row.match_id, kickoff_at: m?.kickoff_at ?? '' })
-      }
-      byMatch.get(row.match_id)!.push({ user_id: row.user_id, points: row.points })
+      if (!byMatch.has(row.match_id)) byMatch.set(row.match_id, [])
+      const m = Array.isArray(row.matches) ? row.matches[0] : row.matches
+      byMatch.get(row.match_id)!.push({ user_id: row.user_id, points: row.points, kickoff_at: m?.kickoff_at ?? '' })
     }
-    matchOrder.sort((a, b) => a.kickoff_at.localeCompare(b.kickoff_at))
+
+    // Group matches by Helsinki date (UTC+3 → add 3h before taking date)
+    const byDay: Map<string, number[]> = new Map()
+    for (const [match_id, rows] of byMatch) {
+      const kickoff = rows[0]?.kickoff_at
+      const helsinkiDate = kickoff
+        ? new Date(new Date(kickoff).getTime() + 3 * 60 * 60 * 1000).toISOString().slice(0, 10)
+        : 'unknown'
+      if (!byDay.has(helsinkiDate)) byDay.set(helsinkiDate, [])
+      byDay.get(helsinkiDate)!.push(match_id)
+    }
 
     const running: Record<string, number> = {}
-    for (const { match_id } of matchOrder) {
-      for (const { user_id, points } of byMatch.get(match_id) ?? []) {
-        running[user_id] = (running[user_id] ?? 0) + points
+    for (const day of [...byDay.keys()].sort()) {
+      for (const match_id of byDay.get(day)!) {
+        for (const { user_id, points } of byMatch.get(match_id)!) {
+          running[user_id] = (running[user_id] ?? 0) + points
+        }
       }
+      if (Object.keys(running).length === 0) continue
       const maxPts = Math.max(...Object.values(running))
       for (const [uid, pts] of Object.entries(running)) {
         if (pts === maxPts && stats[uid]) stats[uid].lead_count++
@@ -265,7 +273,7 @@ export async function sendStatsTable(chatId?: number | string): Promise<void> {
     padL(pct(s.decisive_correct, s.decisive_preds), 5) +
     padL(String(s.lead_count), 4)
   )
-  const legend2 = '\n\n<i>Nol%=nollaottelut, L-KA=lohkovaihe KA, J-KA=jatkopelit KA\nTas%=tasurihakujen osuma, Ylä%=voittohakujen osuma, Jht=johtohetket</i>'
+  const legend2 = '\n\n<i>Nol%=nollaottelut, L-KA=lohkovaihe KA, J-KA=jatkopelit KA\nTas%=tasurihakujen osuma, Ylä%=voittohakujen osuma, Jht=päiviä johdossa</i>'
   await sendMessage(target, h2 + `<code>${c2}\n${'─'.repeat(42)}\n${r2.join('\n')}</code>` + legend2)
 
   // ── Message 3: Special bets ───────────────────────────────────────────────
