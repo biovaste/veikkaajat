@@ -19,7 +19,7 @@ export default async function LeaderboardPage() {
     myName = profile?.display_name ?? null
   }
 
-  const [{ data: log }, { data: allProfiles }] = await Promise.all([
+  const [{ data: log }, { data: allProfiles }, { data: categoryBets }] = await Promise.all([
     supabase
       .from('scoring_log')
       .select('user_id, points, match_id, matches(kickoff_at), profiles(display_name)')
@@ -29,6 +29,10 @@ export default async function LeaderboardPage() {
       .select('display_name')
       .not('display_name', 'is', null)
       .order('display_name'),
+    supabase
+      .from('category_bets')
+      .select('points, profiles(display_name)')
+      .not('points', 'is', null),
   ])
 
   // Start with all registered players at 0 points
@@ -42,6 +46,14 @@ export default async function LeaderboardPage() {
   for (const row of log ?? []) {
     const name = (Array.isArray(row.profiles) ? row.profiles[0] : row.profiles)?.display_name
     if (!name) continue
+    if (!totals[name]) totals[name] = { display_name: name, points: 0 }
+    totals[name].points += row.points
+  }
+
+  // Add points from scored special bets (world champion, group advance)
+  for (const row of categoryBets ?? []) {
+    const name = (Array.isArray(row.profiles) ? row.profiles[0] : row.profiles)?.display_name
+    if (!name || row.points === null) continue
     if (!totals[name]) totals[name] = { display_name: name, points: 0 }
     totals[name].points += row.points
   }

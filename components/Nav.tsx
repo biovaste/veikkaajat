@@ -23,6 +23,7 @@ export default function Nav({ isAdmin }: NavProps) {
     { href: '/leaderboard', label: 'Pisteet', short: 'Pisteet' },
     { href: '/matches', label: 'Ottelut', short: 'Ottelut' },
     { href: '/my-predictions', label: 'Veikkaukseni', short: 'Omat' },
+    { href: '/bets', label: 'Erikoisveikkaukset', short: 'Bonus' },
     { href: '/settings', label: 'Asetukset', short: '⚙' },
     ...(isAdmin ? [{ href: '/admin', label: 'Admin', short: 'Admin' }] : []),
   ]

@@ -96,8 +96,17 @@ export default function SettingsPage() {
             placeholder="esim. 123456789"
           />
           <p className="text-xs text-gray-400">
-            Saat tunnisteen lähettämällä <span className="font-mono">/start</span> botille yksityisviestinä.
-            Tarvitaan muistutuksia varten.
+            Lähetä <span className="font-mono">/start</span> botille{' '}
+            <a
+              href="https://t.me/veikkaajat_apumarko_bot"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-500 underline"
+            >
+              @veikkaajat_apumarko_bot
+            </a>{' '}
+            yksityisviestinä ja kopioi vastauksessa oleva numero tähän.
+            Tarvitaan veikkausmuistutuksia varten.
           </p>
         </div>
 
@@ -121,9 +130,9 @@ export default function SettingsPage() {
       <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 space-y-1">
         <p className="text-xs font-medium text-blue-800">Näin rekisteröit Telegramisi:</p>
         <ol className="text-xs text-blue-700 space-y-0.5 list-decimal list-inside">
-          <li>Avaa Telegram ja hae botti nimellä (@bottinimi)</li>
+          <li>Avaa Telegram ja hae <span className="font-mono">@veikkaajat_apumarko_bot</span></li>
           <li>Lähetä sille viesti <span className="font-mono">/start</span></li>
-          <li>Kopioi botti vastaa numerosarjan (tunniste)</li>
+          <li>Kopioi botin vastauksessa oleva numero</li>
           <li>Liitä se yllä olevaan kenttään ja tallenna</li>
         </ol>
       </div>

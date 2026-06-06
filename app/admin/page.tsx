@@ -26,6 +26,13 @@ export default function AdminPage() {
           <div className="font-medium">Pelaajat</div>
           <div className="text-sm text-gray-500 mt-0.5">Kutsu pelaajia ja tarkastele tilastoja</div>
         </Link>
+        <Link
+          href="/admin/categories"
+          className="block p-4 bg-white rounded-lg border border-gray-200 hover:border-blue-300 transition-colors"
+        >
+          <div className="font-medium">Erikoisveikkaukset</div>
+          <div className="text-sm text-gray-500 mt-0.5">Pisteytä maailmanmestari ja lohkojen jatkajat</div>
+        </Link>
       </div>
     </div>
   )

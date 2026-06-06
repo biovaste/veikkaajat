@@ -8,7 +8,10 @@
       "Bash(New-Item -ItemType Directory -Force \"E:\\\\claude\\\\veikkaajat\\\\supabase\\\\functions\\\\check-upcoming-matches\")",
       "Bash(Out-Null)",
       "Bash(New-Item -ItemType Directory -Force \"E:\\\\claude\\\\veikkaajat\\\\supabase\\\\functions\\\\poll-match-results\")",
-      "PowerShell(cd E:\\\\claude\\\\veikkaajat; $env:PATH = [System.Environment]::GetEnvironmentVariable\\(\"PATH\",\"Machine\"\\) + \";\" + [System.Environment]::GetEnvironmentVariable\\(\"PATH\",\"User\"\\); npx tsc --noEmit 2>&1 | head -60)"
+      "PowerShell(cd E:\\\\claude\\\\veikkaajat; $env:PATH = [System.Environment]::GetEnvironmentVariable\\(\"PATH\",\"Machine\"\\) + \";\" + [System.Environment]::GetEnvironmentVariable\\(\"PATH\",\"User\"\\); npx tsc --noEmit 2>&1 | head -60)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)"
     ]
   }
 }
