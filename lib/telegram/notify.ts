@@ -133,12 +133,16 @@ export async function sendStatsTable(chatId?: number | string): Promise<void> {
   const target = String(chatId ?? GROUP_CHAT_ID)
   const admin = createServiceRoleClient()
 
-  const [{ data: log }, { data: profiles }, { data: catBets }, { data: preds }] = await Promise.all([
+  const [{ data: log }, { data: profiles }, { data: catBets }, { data: preds }, { data: firstMatch }] = await Promise.all([
     admin.from('scoring_log').select('user_id, points, breakdown, match_id, matches(stage, kickoff_at)').order('match_id', { ascending: true }),
     admin.from('profiles').select('id, display_name').order('display_name'),
     admin.from('category_bets').select('user_id, category, bet_value, points'),
     admin.from('predictions').select('user_id, home_score_pred, away_score_pred, matches(home_score, away_score, status)'),
+    admin.from('matches').select('kickoff_at').order('kickoff_at', { ascending: true }).limit(1).single(),
   ])
+
+  // Special bet picks are hidden until the betting deadline (first match kickoff) has passed
+  const categoryBetsOpen = !firstMatch?.kickoff_at || new Date() < new Date(firstMatch.kickoff_at)
 
   if (!profiles) {
     await sendMessage(target, '⚠️ Tilastoja ei saatavilla.')
@@ -231,8 +235,11 @@ export async function sendStatsTable(chatId?: number | string): Promise<void> {
     const s = stats[row.user_id]
     if (!s) continue
     if (row.points !== null) { s.total += row.points; s.bonus += row.points }
-    if (row.category === 'WORLD_CHAMPION') s.champion_bet = row.bet_value
-    if (row.category === 'TOP_SCORER') s.scorer_bet = row.bet_value
+    // Only reveal picks after betting has closed
+    if (!categoryBetsOpen) {
+      if (row.category === 'WORLD_CHAMPION') s.champion_bet = row.bet_value
+      if (row.category === 'TOP_SCORER') s.scorer_bet = row.bet_value
+    }
   }
 
   // Draw / decisive prediction accuracy
@@ -253,44 +260,59 @@ export async function sendStatsTable(chatId?: number | string): Promise<void> {
   const pct = (n: number, d: number) => d > 0 ? Math.round(n / d * 100) + '%' : '–'
   const avg = (pts: number, n: number) => n > 0 ? (pts / n).toFixed(1).replace('.', ',') : '–'
 
-  // ── Message 1: Standings ──────────────────────────────────────────────────
-  const h1 = `📊 <b>Sarjataulukko — ${scoredMatches} ottelua</b>\n\n`
-  const c1 = padR('#', 3) + padR('Pelaaja', 13) + padL('Pts', 4) + padL('KA', 5) + padL('Tark', 5) + padL('Mrk%', 5)
-  const r1 = sorted.map((s, i) =>
-    padR(`${i + 1}.`, 3) + padR(truncate(s.display_name, 12), 13) +
-    padL(String(s.total), 4) + padL(avg(s.total - s.bonus, s.matches), 5) +
-    padL(String(s.exact), 5) + padL(pct(s.correct_result, s.matches), 5)
-  )
-  await sendMessage(target, h1 + `<code>${c1}\n${'─'.repeat(35)}\n${r1.join('\n')}</code>`)
+  const hasBets = !categoryBetsOpen && sorted.some(s => s.champion_bet || s.scorer_bet)
 
-  // ── Message 2: Advanced stats ─────────────────────────────────────────────
-  const h2 = `📈 <b>Lisätilastot</b>\n\n`
-  const c2 = padR('Pelaaja', 13) + padL('Nol%', 5) + padL('L-KA', 5) + padL('J-KA', 5) + padL('Tas%', 5) + padL('Ylä%', 5) + padL('Jht', 4)
-  const r2 = sorted.map(s =>
-    padR(truncate(s.display_name, 12), 13) +
-    padL(pct(s.zero_matches, s.matches), 5) +
-    padL(avg(s.group_pts, s.group_n), 5) +
-    padL(avg(s.knockout_pts, s.knockout_n), 5) +
-    padL(pct(s.draw_correct, s.draw_preds), 5) +
-    padL(pct(s.decisive_correct, s.decisive_preds), 5) +
-    padL(String(s.lead_count), 4)
-  )
-  const legend2 = '\n\n<i>Nol%=nollaottelut, L-KA=lohkovaihe KA, J-KA=jatkopelit KA\nTas%=tasurihakujen osuma, Ylä%=voittohakujen osuma, Jht=päiviä johdossa</i>'
-  await sendMessage(target, h2 + `<code>${c2}\n${'─'.repeat(42)}\n${r2.join('\n')}</code>` + legend2)
+  // Build table rows
+  const head = ['#', 'Pelaaja', 'Pts', 'KA', 'Tark', 'Mrk%', 'Nol%', 'L-KA', 'J-KA', 'Tas%', 'Ylä%', 'Jht',
+    ...(hasBets ? ['Mestari', 'Maalikuningas'] : [])]
 
-  // ── Message 3: Special bets ───────────────────────────────────────────────
-  const hasBets = sorted.some(s => s.champion_bet || s.scorer_bet)
-  if (hasBets) {
-    const h3 = `🎯 <b>Erikoisveikkaukset</b>\n\n`
-    const c3 = padR('Pelaaja', 13) + '  ' + padR('Mestari', 12) + '  Maalikuningas'
-    const r3 = sorted.map(s => {
-      const champ = s.champion_bet ? getCountry(s.champion_bet).name : '–'
-      const scorer = s.scorer_bet
-        ? (isWildcard(s.scorer_bet) ? `Muu ${getCountry(wildcardCountry(s.scorer_bet)).name}` : s.scorer_bet)
-        : '–'
-      return padR(truncate(s.display_name, 12), 13) + '  ' + padR(truncate(champ, 11), 12) + '  ' + truncate(scorer, 18)
-    })
-    await sendMessage(target, h3 + `<code>${c3}\n${'─'.repeat(45)}\n${r3.join('\n')}</code>`)
+  const body = sorted.map((s, i) => {
+    const champ = s.champion_bet ? getCountry(s.champion_bet).name : '–'
+    const scorer = s.scorer_bet
+      ? (isWildcard(s.scorer_bet) ? `Muu ${getCountry(wildcardCountry(s.scorer_bet)).name}` : s.scorer_bet)
+      : '–'
+    return [
+      String(i + 1),
+      s.display_name,
+      String(s.total),
+      avg(s.total - s.bonus, s.matches),
+      String(s.exact),
+      pct(s.correct_result, s.matches),
+      pct(s.zero_matches, s.matches),
+      avg(s.group_pts, s.group_n),
+      avg(s.knockout_pts, s.knockout_n),
+      pct(s.draw_correct, s.draw_preds),
+      pct(s.decisive_correct, s.decisive_preds),
+      String(s.lead_count),
+      ...(hasBets ? [champ, scorer] : []),
+    ]
+  })
+
+  // Build QuickChart table image URL
+  const chartConfig = {
+    type: 'table' as const,
+    data: { head, body },
+    options: {
+      title: { text: `MM 2026 — Tilastot (${scoredMatches} ottelua)` },
+      plugins: {
+        backgroundColor: '#1e293b',
+        fontColor: '#f1f5f9',
+        columnWidth: 50,
+      },
+    },
+  }
+
+  const encoded = encodeURIComponent(JSON.stringify(chartConfig))
+  const url = `https://quickchart.io/chart?w=900&h=${120 + sorted.length * 28}&c=${encoded}&backgroundColor=%231e293b`
+
+  try {
+    await sendPhoto(target, url, `📊 MM 2026 — Tilastot — ${scoredMatches} ottelua`)
+  } catch {
+    // Fallback to text if image fails
+    const lines = sorted.map((s, i) =>
+      `${i + 1}. ${s.display_name} — ${s.total} p  KA ${avg(s.total - s.bonus, s.matches)}  Tark ${s.exact}  Mrk ${pct(s.correct_result, s.matches)}  Jht ${s.lead_count}`
+    )
+    await sendMessage(target, `📊 <b>MM 2026 — Tilastot — ${scoredMatches} ottelua</b>\n\n<code>${lines.join('\n')}</code>`)
   }
 }
 
