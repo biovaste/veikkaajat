@@ -138,7 +138,6 @@ export default function AdminCategoriesPage() {
                 onClick={() => { setScorerInput(isSelected ? '' : player.name); setDone(p => { const n = { ...p }; delete n['TOP_SCORER']; return n }) }}
                 className={`w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors ${isSelected ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-50'}`}
               >
-                <span className="text-gray-300 w-5 text-right shrink-0">{player.rank}</span>
                 {code && <img src={flagUrl(code)} alt={countryFi} width={14} height={11} className="rounded-sm shrink-0" />}
                 <span className="flex-1">{player.name}</span>
                 <span className="text-gray-400">{countryFi}</span>

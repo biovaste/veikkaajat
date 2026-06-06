@@ -1,4 +1,5 @@
 import { createServerClient } from '@/lib/supabase/server'
+import { redirect } from 'next/navigation'
 import PointsChart from '@/components/PointsChart'
 import { calculatePoints } from '@/lib/scoring/engine'
 
@@ -8,25 +9,35 @@ export default async function LeaderboardPage() {
   const supabase = await createServerClient()
 
   const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
 
-  let myId: string | null = null
-  if (user) myId = user.id
+  const myId = user.id
+
+  // ── Fetch data with explicit error logging ─────────────────────────────────
 
   const [
-    { data: allProfiles },
-    { data: log },
-    { data: categoryBets },
-    { data: preds },
+    { data: allProfiles, error: profilesError },
+    { data: log, error: logError },
+    { data: categoryBets, error: betsError },
+    { data: preds, error: predsError },
     { data: xgMatches },
     { data: firstMatch },
   ] = await Promise.all([
-    supabase.from('profiles').select('id, display_name').not('display_name', 'is', null).order('display_name'),
+    supabase.from('profiles').select('id, display_name').order('display_name'),
     supabase.from('scoring_log').select('user_id, points, breakdown, match_id, matches(stage, kickoff_at)').order('match_id', { ascending: true }),
     supabase.from('category_bets').select('user_id, points, category').not('points', 'is', null),
     supabase.from('predictions').select('user_id, home_score_pred, away_score_pred, match_id, matches(home_score, away_score, status)'),
     supabase.from('matches').select('id, home_xg, away_xg').not('home_xg', 'is', null).not('away_xg', 'is', null),
-    supabase.from('matches').select('kickoff_at').order('kickoff_at', { ascending: true }).limit(1).single(),
+    supabase.from('matches').select('kickoff_at').order('kickoff_at', { ascending: true }).limit(1).maybeSingle(),
   ])
+
+  if (profilesError) console.error('[leaderboard] profiles error:', profilesError)
+  if (logError) console.error('[leaderboard] scoring_log error:', logError)
+  if (betsError) console.error('[leaderboard] category_bets error:', betsError)
+  if (predsError) console.error('[leaderboard] predictions error:', predsError)
+
+  // Profiles with no display_name fall back to email prefix (trigger ensures this, but guard anyway)
+  const profiles = (allProfiles ?? []).filter(p => p.display_name)
 
   const categoryBetsOpen = !firstMatch?.kickoff_at || new Date() < new Date(firstMatch.kickoff_at)
 
@@ -51,8 +62,7 @@ export default async function LeaderboardPage() {
   }
 
   const stats: Record<string, PlayerStats> = {}
-  for (const p of allProfiles ?? []) {
-    if (!p.display_name) continue
+  for (const p of profiles) {
     stats[p.id] = {
       id: p.id, display_name: p.display_name,
       total: 0, bonus: 0, match_pts: 0, matches: 0,
@@ -71,9 +81,9 @@ export default async function LeaderboardPage() {
     s.match_pts += row.points
     s.matches += 1
     if (row.points === 0) s.zero_matches += 1
-    const b = row.breakdown as { result: number; home_goals: number; away_goals: number }
-    if (b.result === 3 && b.home_goals === 1 && b.away_goals === 1) s.exact += 1
-    if (b.result === 3) s.correct_result += 1
+    const b = row.breakdown as { result: number; home_goals: number; away_goals: number } | null
+    if (b && b.result === 3 && b.home_goals === 1 && b.away_goals === 1) s.exact += 1
+    if (b && b.result === 3) s.correct_result += 1
     const m = Array.isArray(row.matches) ? row.matches[0] : row.matches
     if (m?.stage === 'GROUP_STAGE') { s.group_pts += row.points; s.group_n += 1 }
     else if (m?.stage) { s.knockout_pts += row.points; s.knockout_n += 1 }
@@ -147,7 +157,7 @@ export default async function LeaderboardPage() {
   }
 
   const sorted = Object.values(stats).sort((a, b) => b.total - a.total)
-  const scoredMatches = Math.max(...sorted.map(s => s.matches), 0)
+  const scoredMatches = sorted.reduce((max, s) => Math.max(max, s.matches), 0)
 
   const myName = sorted.find(s => s.id === myId)?.display_name ?? null
 
@@ -156,7 +166,7 @@ export default async function LeaderboardPage() {
   const players = sorted.map(s => s.display_name)
   const byMatch2: Record<number, { name: string; points: number }[]> = {}
   for (const row of log ?? []) {
-    const name = (allProfiles ?? []).find(p => p.id === row.user_id)?.display_name
+    const name = profiles.find(p => p.id === row.user_id)?.display_name
     if (!name) continue
     if (!byMatch2[row.match_id]) byMatch2[row.match_id] = []
     byMatch2[row.match_id].push({ name, points: row.points })
@@ -181,7 +191,9 @@ export default async function LeaderboardPage() {
       <h1 className="text-2xl font-bold">Sarjataulukko</h1>
 
       {sorted.length === 0 ? (
-        <p className="text-gray-400 text-sm">Pisteitä ei vielä kertynyt — peli alkaa pian!</p>
+        <p className="text-gray-400 text-sm">
+          Ei pelaajia vielä — admin lisää pelaajat kutsumalla heidät sähköpostilla.
+        </p>
       ) : (
         <>
           {/* ── Leaderboard ── */}
@@ -196,7 +208,7 @@ export default async function LeaderboardPage() {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {sorted.map((p, i) => {
-                  const isMe = myName && p.display_name === myName
+                  const isMe = p.id === myId
                   return (
                     <tr key={p.id} className={isMe ? 'bg-blue-50' : i === 0 ? 'bg-yellow-50' : ''}>
                       <td className="px-4 py-2.5 font-medium text-gray-500">
@@ -245,7 +257,7 @@ export default async function LeaderboardPage() {
                   </thead>
                   <tbody className="divide-y divide-gray-100">
                     {sorted.map((s, i) => {
-                      const isMe = myName && s.display_name === myName
+                      const isMe = s.id === myId
                       return (
                         <tr key={s.id} className={isMe ? 'bg-blue-50' : i === 0 ? 'bg-yellow-50' : ''}>
                           <td className="px-3 py-2 text-gray-500 sticky left-0 bg-inherit">{i + 1}</td>

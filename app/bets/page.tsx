@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { getCountry, flagUrl } from '@/lib/countries'
-import { TOP_SCORER_PLAYERS, wildcardValue, isWildcard, wildcardCountry } from '@/lib/players'
+import { TOP_SCORER_PLAYERS, getPlayerCountries, wildcardValue, isWildcard, wildcardCountry } from '@/lib/players'
 import { useRouter } from 'next/navigation'
 
 interface GroupInfo {
@@ -89,6 +89,7 @@ export default function BetsPage() {
   const [saving, setSaving] = useState<Record<string, boolean>>({})
   const [saved, setSaved] = useState<Record<string, boolean>>({})
   const [errors, setErrors] = useState<Record<string, string>>({})
+  const [scorerSearch, setScorerSearch] = useState('')
 
   useEffect(() => {
     async function load() {
@@ -275,10 +276,6 @@ export default function BetsPage() {
         const scorerLocked = championLocked // same deadline as world champion
         const scorerResult = data.results['TOP_SCORER']
         const scorerPoints = data.points['TOP_SCORER']
-        // All participating countries from the matches table, sorted by Finnish name
-        const playerCountries = Array.from(
-          new Set(Object.values(data.groups).flatMap(g => g.teams))
-        ).sort((a, b) => getCountry(a).name.localeCompare(getCountry(b).name, 'fi'))
 
         return (
           <div className="bg-white rounded-lg border border-gray-200 p-4 space-y-3">
@@ -323,50 +320,79 @@ export default function BetsPage() {
               </div>
             ) : (
               <div className="space-y-2">
-                <div className="max-h-72 overflow-y-auto rounded-lg border border-gray-200 divide-y divide-gray-100">
-                  {/* Named players */}
-                  {TOP_SCORER_PLAYERS.map(player => {
-                    const { name: countryFi, code } = getCountry(player.country)
-                    const isSelected = scorerPick === player.name
-                    return (
-                      <button
-                        key={player.name}
-                        onClick={() => { setScorerPick(isSelected ? '' : player.name); setSaved(s => ({ ...s, TOP_SCORER: false })) }}
-                        className={`w-full flex items-center gap-2 px-3 py-2 text-left text-sm transition-colors ${
-                          isSelected ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-50'
-                        }`}
-                      >
-                        <span className="text-xs text-gray-300 w-5 shrink-0 text-right">{player.rank}</span>
-                        {code && <img src={flagUrl(code)} alt={countryFi} width={16} height={12} className="rounded-sm shrink-0" />}
-                        <span className="flex-1">{player.name}</span>
-                        <span className="text-xs text-gray-400">{countryFi}</span>
-                        {isSelected && <span className="text-blue-500 text-xs">✓</span>}
-                      </button>
-                    )
-                  })}
-                  {/* Wildcard options per country */}
-                  <div className="bg-gray-50 px-3 py-1.5">
-                    <span className="text-xs font-medium text-gray-400 uppercase tracking-wider">Muu pelaaja maasta</span>
-                  </div>
-                  {playerCountries.map(country => {
-                    const wv = wildcardValue(country)
-                    const { name: countryFi, code } = getCountry(country)
-                    const isSelected = scorerPick === wv
-                    return (
-                      <button
-                        key={wv}
-                        onClick={() => { setScorerPick(isSelected ? '' : wv); setSaved(s => ({ ...s, TOP_SCORER: false })) }}
-                        className={`w-full flex items-center gap-2 px-3 py-2 text-left text-sm transition-colors ${
-                          isSelected ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-50'
-                        }`}
-                      >
-                        <span className="w-5 shrink-0" />
-                        {code && <img src={flagUrl(code)} alt={countryFi} width={16} height={12} className="rounded-sm shrink-0" />}
-                        <span className="flex-1 text-gray-600">Muu {countryFi} pelaaja</span>
-                        {isSelected && <span className="text-blue-500 text-xs">✓</span>}
-                      </button>
-                    )
-                  })}
+                {/* Search box */}
+                <input
+                  type="search"
+                  placeholder="Hae pelaajaa tai maata…"
+                  value={scorerSearch}
+                  onChange={e => setScorerSearch(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <div className="max-h-80 overflow-y-auto rounded-lg border border-gray-200">
+                  {/* Players grouped by country */}
+                  {(() => {
+                    const q = scorerSearch.trim().toLowerCase()
+                    // Build country groups preserving sorted order from players.ts
+                    const countries = getPlayerCountries()
+                    const groups = countries.map(country => {
+                      const { name: countryFi, code } = getCountry(country)
+                      const players = TOP_SCORER_PLAYERS.filter(p => p.country === country)
+                      const matchesCountry = !q || countryFi.toLowerCase().includes(q)
+                      const filteredPlayers = matchesCountry
+                        ? players
+                        : players.filter(p => p.name.toLowerCase().includes(q))
+                      const showWildcard = matchesCountry || `muu ${countryFi}`.toLowerCase().includes(q)
+                      return { country, countryFi, code, filteredPlayers, showWildcard }
+                    }).filter(g => g.filteredPlayers.length > 0 || g.showWildcard)
+
+                    if (groups.length === 0) {
+                      return <p className="px-3 py-4 text-sm text-gray-400 text-center">Ei tuloksia</p>
+                    }
+
+                    return groups.map(({ country, countryFi, code, filteredPlayers, showWildcard }) => {
+                      const wv = wildcardValue(country)
+                      return (
+                        <div key={country}>
+                          {/* Country header */}
+                          <div className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-50 border-b border-gray-100">
+                            {code && <img src={flagUrl(code)} alt={countryFi} width={16} height={12} className="rounded-sm shrink-0" />}
+                            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{countryFi}</span>
+                          </div>
+                          {/* Named players */}
+                          {filteredPlayers.map(player => {
+                            const isSelected = scorerPick === player.name
+                            return (
+                              <button
+                                key={player.name}
+                                onClick={() => { setScorerPick(isSelected ? '' : player.name); setSaved(s => ({ ...s, TOP_SCORER: false })) }}
+                                className={`w-full flex items-center gap-2 px-3 py-2 text-left text-sm transition-colors border-b border-gray-100 last:border-0 ${
+                                  isSelected ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-50'
+                                }`}
+                              >
+                                <span className="flex-1">{player.name}</span>
+                                {isSelected && <span className="text-blue-500 text-xs">✓</span>}
+                              </button>
+                            )
+                          })}
+                          {/* Wildcard for this country */}
+                          {showWildcard && (() => {
+                            const isSelected = scorerPick === wv
+                            return (
+                              <button
+                                onClick={() => { setScorerPick(isSelected ? '' : wv); setSaved(s => ({ ...s, TOP_SCORER: false })) }}
+                                className={`w-full flex items-center gap-2 px-3 py-2 text-left text-sm transition-colors border-b border-gray-100 last:border-0 ${
+                                  isSelected ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-50'
+                                }`}
+                              >
+                                <span className="flex-1 italic text-gray-500">Muu {countryFi} pelaaja</span>
+                                {isSelected && <span className="text-blue-500 text-xs">✓</span>}
+                              </button>
+                            )
+                          })()}
+                        </div>
+                      )
+                    })
+                  })()}
                 </div>
 
                 {errors['TOP_SCORER'] && <p className="text-xs text-red-600">{errors['TOP_SCORER']}</p>}
