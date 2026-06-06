@@ -211,15 +211,21 @@ npm test           # vitest unit tests
 
 ---
 
-### 🔲 Phase 3 — Scoring + Leaderboard
+### ✅ Phase 3 — Scoring + Leaderboard
 **Goal:** Admin confirms result; points calculated; leaderboard updates.
 
-Files to create:
-- `lib/scoring/engine.ts` — `calculatePoints(pred, result)` pure function with unit tests
-- `app/api/admin/override-result/route.ts` — set score → run scoring → insert scoring_log
-- `app/admin/matches/page.tsx` — result override UI
+**Status: Complete**
 
-Done when: all 5-point scoring cases correct; leaderboard reflects new totals.
+- `lib/scoring/engine.ts` — `calculatePoints()` pure function; scores full-time only (extra time/pens ignored for knockout matches)
+- `lib/scoring/engine.test.ts` — 9 unit tests covering all point combinations (0–5 pts), all pass
+- `app/api/admin/override-result/route.ts` — sets match score, scores all predictions, inserts scoring_log
+- `app/admin/matches/page.tsx` — filterable match list with inline result override form
+
+**Verify:**
+1. Admin → Tulokset → set a result → "✓ N veikkausta pisteytetty"
+2. `/leaderboard` shows updated points
+3. `/matches` shows result + player's points on that match
+4. `/my-predictions` shows points per match
 
 ---
 
