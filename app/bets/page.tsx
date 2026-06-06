@@ -174,7 +174,7 @@ export default function BetsPage() {
   const sortedGroups = Object.entries(data.groups).sort(([a], [b]) => a.localeCompare(b))
 
   // Total bonus points earned so far
-  const totalBonus = Object.values(data.points).reduce((sum, p) => sum + (p ?? 0), 0)
+  const totalBonus = Object.values(data.points).reduce((sum, p) => (sum ?? 0) + (p ?? 0), 0)
   const maxBonus = 10 + sortedGroups.length * 8 // 10 for champion + 8 per group
 
   return (
