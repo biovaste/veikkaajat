@@ -14,17 +14,10 @@ interface Props {
   // Array of { matchIndex, player1: cumPoints, player2: cumPoints, ... }
   data: Record<string, number>[]
   players: string[]
+  colors?: string[] // one per player, in same order as players array
 }
 
-// Distinct colours for up to 20 players
-const COLOURS = [
-  '#2563eb', '#dc2626', '#d97706', '#16a34a', '#9333ea',
-  '#0891b2', '#db2777', '#65a30d', '#ea580c', '#0d9488',
-  '#7c3aed', '#b45309', '#15803d', '#1d4ed8', '#be185d',
-  '#0369a1', '#92400e', '#166534', '#6d28d9', '#9f1239',
-]
-
-export default function PointsChart({ data, players }: Props) {
+export default function PointsChart({ data, players, colors }: Props) {
   if (data.length === 0 && players.length === 0) return null
 
   return (
@@ -53,7 +46,7 @@ export default function PointsChart({ data, players }: Props) {
               key={player}
               type="linear"
               dataKey={player}
-              stroke={COLOURS[i % COLOURS.length]}
+              stroke={colors?.[i] ?? '#888888'}
               strokeWidth={1.5}
               dot={false}
               activeDot={{ r: 3 }}

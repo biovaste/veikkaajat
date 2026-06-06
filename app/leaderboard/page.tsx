@@ -2,6 +2,7 @@ import { createServerClient, createServiceRoleClient } from '@/lib/supabase/serv
 import { redirect } from 'next/navigation'
 import PointsChart from '@/components/PointsChart'
 import { calculatePoints } from '@/lib/scoring/engine'
+import { assignColors } from '@/lib/colors'
 
 export const dynamic = 'force-dynamic'
 
@@ -26,7 +27,7 @@ export default async function LeaderboardPage() {
     { data: xgMatches },
     { data: firstMatch },
   ] = await Promise.all([
-    supabase.from('profiles').select('id, display_name').order('display_name'),
+    supabase.from('profiles').select('id, display_name, chart_color').order('display_name'),
     supabase.from('scoring_log').select('user_id, points, breakdown, match_id, matches(stage, kickoff_at)').order('match_id', { ascending: true }),
     supabase.from('category_bets').select('user_id, points, category').not('points', 'is', null),
     srSupabase.from('predictions').select('user_id, home_score_pred, away_score_pred, match_id, matches(home_score, away_score, status)'),
@@ -202,7 +203,15 @@ export default async function LeaderboardPage() {
   const sorted = Object.values(stats).sort((a, b) => b.total - a.total)
   const scoredMatches = sorted.reduce((max, s) => Math.max(max, s.matches), 0)
 
-  const myName = sorted.find(s => s.id === myId)?.display_name ?? null
+  // Assign chart colors (explicit picks first, rest filled from pool)
+  const colorMap = assignColors(
+    sorted.map(s => ({
+      id: s.id,
+      chart_color: profiles.find(p => p.id === s.id)?.chart_color ?? null,
+    }))
+  )
+  // Array of colors in sorted order, for the chart
+  const playerColors = sorted.map(s => colorMap[s.id])
 
   // ── Chart data ─────────────────────────────────────────────────────────────
 
@@ -290,7 +299,7 @@ export default async function LeaderboardPage() {
           </div>
 
           {/* ── Chart ── */}
-          <PointsChart data={chartData} players={players} />
+          <PointsChart data={chartData} players={players} colors={playerColors} />
 
           {/* ── Stats table (transposed: stats = rows, players = columns) ── */}
           {(
