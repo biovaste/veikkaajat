@@ -1,5 +1,5 @@
 import { createServiceRoleClient } from '@/lib/supabase/server'
-import { sendMessage, sendPhoto, getQuickChartUrl } from './bot'
+import { sendMessage, sendPhoto, sendPhotoBuffer, getQuickChartUrl } from './bot'
 import { getCountry } from '../countries'
 import { isWildcard, wildcardCountry } from '../players'
 import { calculatePoints } from '../scoring/engine'
@@ -318,27 +318,16 @@ export async function sendStatsTable(chatId?: number | string): Promise<void> {
     ]
   })
 
-  // Build QuickChart table image URL
-  // QuickChart table type: https://quickchart.io/documentation/chart-types/table/
-  const chartConfig = {
-    type: 'table',
-    data: { head, body },
-    options: {
-      title: `MM 2026 — Tilastot — ${scoredMatches} ottelua`,
-      fontStyle: 'bold',
-      fontSize: 13,
-    },
-  }
-
-  const encoded = encodeURIComponent(JSON.stringify(chartConfig))
+  // Build QuickChart table image via POST (avoids URL length limits)
   const rowH = 26
-  const h = 60 + (sorted.length + 1) * rowH  // +1 for header row
-  const url = `https://quickchart.io/chart?w=960&h=${h}&c=${encoded}&backgroundColor=white`
+  const h = 60 + (sorted.length + 1) * rowH
+  const chartConfig = { type: 'table', data: { head, body } }
 
   try {
-    await sendPhoto(target, url, `📊 MM 2026 — Tilastot — ${scoredMatches} ottelua`)
-  } catch {
-    // Fallback to text if image fails
+    const url = await getQuickChartUrl(chartConfig, 960, h)
+    await sendPhotoBuffer(target, url, `📊 MM 2026 — Tilastot — ${scoredMatches} ottelua`)
+  } catch (err) {
+    console.error('[stats] image failed, falling back to text:', err)
     const lines = sorted.map((s, i) =>
       `${i + 1}. ${s.display_name} — ${s.total} p  KA ${avg(s.total - s.bonus, s.matches)}  Tark ${s.exact}  Mrk ${pct(s.correct_result, s.matches)}  Jht ${s.lead_count}`
     )

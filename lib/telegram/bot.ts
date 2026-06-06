@@ -37,6 +37,30 @@ export async function sendPhoto(
   }
 }
 
+/** Fetch an image URL and send it as a file upload (bypasses Telegram's URL size/format limits) */
+export async function sendPhotoBuffer(
+  chatId: string | number,
+  imageUrl: string,
+  caption?: string,
+): Promise<void> {
+  // Fetch the image
+  const imgRes = await fetch(imageUrl)
+  if (!imgRes.ok) throw new Error(`Image fetch failed: ${imgRes.status}`)
+  const buffer = await imgRes.arrayBuffer()
+
+  // Upload as multipart/form-data
+  const form = new FormData()
+  form.append('chat_id', String(chatId))
+  form.append('photo', new Blob([buffer], { type: 'image/png' }), 'stats.png')
+  if (caption) form.append('caption', caption)
+
+  const res = await fetch(`${BASE}/sendPhoto`, { method: 'POST', body: form })
+  if (!res.ok) {
+    const err = await res.text()
+    throw new Error(`[telegram] sendPhotoBuffer failed: ${err}`)
+  }
+}
+
 // POST chart config to QuickChart, returns a stable shareable URL
 export async function getQuickChartUrl(
   chartConfig: object,
