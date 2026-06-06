@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { getCountry } from '@/lib/countries'
+import { getCountry, flagUrl } from '@/lib/countries'
+import { TOP_SCORER_PLAYERS, getPlayerCountries, wildcardValue, isWildcard, wildcardCountry } from '@/lib/players'
 
 interface GroupInfo {
   teams: string[]
@@ -17,6 +18,7 @@ export default function AdminCategoriesPage() {
   const [data, setData] = useState<PageData | null>(null)
   const [loading, setLoading] = useState(true)
   const [championInput, setChampionInput] = useState('')
+  const [scorerInput, setScorerInput] = useState('')
   const [groupInputs, setGroupInputs] = useState<Record<string, string[]>>({})
   const [saving, setSaving] = useState<Record<string, boolean>>({})
   const [done, setDone] = useState<Record<string, string>>({}) // category -> "✓ N veikkausta pisteytetty"
@@ -27,6 +29,7 @@ export default function AdminCategoriesPage() {
       .then(d => {
         setData({ groups: d.groups ?? {}, results: d.results ?? {} })
         if (d.results?.['WORLD_CHAMPION']) setChampionInput(d.results['WORLD_CHAMPION'])
+        if (d.results?.['TOP_SCORER']) setScorerInput(d.results['TOP_SCORER'])
         const inputs: Record<string, string[]> = {}
         for (const group of Object.keys(d.groups ?? {})) {
           inputs[group] = d.results?.[group] ? JSON.parse(d.results[group]) : []
@@ -105,6 +108,74 @@ export default function AdminCategoriesPage() {
             className="w-full py-2 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
           >
             {saving['WORLD_CHAMPION'] ? 'Pisteytetään…' : 'Pisteytä'}
+          </button>
+        )}
+      </div>
+
+      {/* Top scorer scoring */}
+      <div className="bg-white rounded-lg border border-gray-200 p-4 space-y-3">
+        <div>
+          <h2 className="font-semibold">⚽ Paras maalintekijä</h2>
+          <p className="text-xs text-gray-400 mt-0.5">5 pistettä oikeasta vastauksesta</p>
+        </div>
+        {data.results['TOP_SCORER'] && (
+          <p className="text-xs text-green-600">
+            Pisteytetty:{' '}
+            <strong>
+              {isWildcard(data.results['TOP_SCORER'])
+                ? `Muu ${getCountry(wildcardCountry(data.results['TOP_SCORER'])).name} pelaaja`
+                : data.results['TOP_SCORER']}
+            </strong>
+          </p>
+        )}
+        <div className="max-h-64 overflow-y-auto rounded border border-gray-200 divide-y divide-gray-100">
+          {TOP_SCORER_PLAYERS.map(player => {
+            const { name: countryFi, code } = getCountry(player.country)
+            const isSelected = scorerInput === player.name
+            return (
+              <button
+                key={player.name}
+                onClick={() => { setScorerInput(isSelected ? '' : player.name); setDone(p => { const n = { ...p }; delete n['TOP_SCORER']; return n }) }}
+                className={`w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors ${isSelected ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-50'}`}
+              >
+                <span className="text-gray-300 w-5 text-right shrink-0">{player.rank}</span>
+                {code && <img src={flagUrl(code)} alt={countryFi} width={14} height={11} className="rounded-sm shrink-0" />}
+                <span className="flex-1">{player.name}</span>
+                <span className="text-gray-400">{countryFi}</span>
+                {isSelected && <span className="text-blue-500">✓</span>}
+              </button>
+            )
+          })}
+          <div className="bg-gray-50 px-3 py-1">
+            <span className="text-xs text-gray-400 uppercase tracking-wider">Muu pelaaja</span>
+          </div>
+          {getPlayerCountries().map(country => {
+            const wv = wildcardValue(country)
+            const { name: countryFi, code } = getCountry(country)
+            const isSelected = scorerInput === wv
+            return (
+              <button
+                key={wv}
+                onClick={() => { setScorerInput(isSelected ? '' : wv); setDone(p => { const n = { ...p }; delete n['TOP_SCORER']; return n }) }}
+                className={`w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors ${isSelected ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-50'}`}
+              >
+                <span className="w-5 shrink-0" />
+                {code && <img src={flagUrl(code)} alt={countryFi} width={14} height={11} className="rounded-sm shrink-0" />}
+                <span className="flex-1 text-gray-600">Muu {countryFi} pelaaja</span>
+                {isSelected && <span className="text-blue-500">✓</span>}
+              </button>
+            )
+          })}
+        </div>
+        {done['TOP_SCORER'] ? (
+          <p className="text-xs text-green-600">{done['TOP_SCORER']}</p>
+        ) : (
+          <button
+            onClick={() => scorerInput && score('TOP_SCORER', scorerInput)}
+            disabled={!scorerInput || saving['TOP_SCORER']}
+            className="w-full py-2 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+          >
+            {saving['TOP_SCORER'] ? 'Pisteytetään…' : 'Pisteytä'}
           </button>
         )}
       </div>

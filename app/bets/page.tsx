@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { getCountry, flagUrl } from '@/lib/countries'
+import { TOP_SCORER_PLAYERS, getPlayerCountries, wildcardValue, isWildcard, wildcardCountry } from '@/lib/players'
 import { useRouter } from 'next/navigation'
 
 interface GroupInfo {
@@ -83,6 +84,7 @@ export default function BetsPage() {
   const [data, setData] = useState<BetsData | null>(null)
   const [loading, setLoading] = useState(true)
   const [championPick, setChampionPick] = useState('')
+  const [scorerPick, setScorerPick] = useState('')
   const [groupPicks, setGroupPicks] = useState<Record<string, string[]>>({})
   const [saving, setSaving] = useState<Record<string, boolean>>({})
   const [saved, setSaved] = useState<Record<string, boolean>>({})
@@ -99,6 +101,7 @@ export default function BetsPage() {
       const d: BetsData = await res.json()
       setData(d)
       setChampionPick(d.bets['WORLD_CHAMPION'] ?? '')
+      setScorerPick(d.bets['TOP_SCORER'] ?? '')
 
       const picks: Record<string, string[]> = {}
       for (const group of Object.keys(d.groups)) {
@@ -128,6 +131,22 @@ export default function BetsPage() {
     } else {
       setErrors(e => ({ ...e, WORLD_CHAMPION: d.error ?? 'Virhe' }))
     }
+  }
+
+  async function saveScorer() {
+    if (!scorerPick) return
+    setSaving(s => ({ ...s, TOP_SCORER: true }))
+    setSaved(s => ({ ...s, TOP_SCORER: false }))
+    setErrors(e => ({ ...e, TOP_SCORER: '' }))
+    const res = await fetch('/api/category-bets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ category: 'TOP_SCORER', bet_value: scorerPick }),
+    })
+    const d = await res.json()
+    setSaving(s => ({ ...s, TOP_SCORER: false }))
+    if (res.ok) setSaved(s => ({ ...s, TOP_SCORER: true }))
+    else setErrors(e => ({ ...e, TOP_SCORER: d.error ?? 'Virhe' }))
   }
 
   async function saveGroup(group: string) {
@@ -175,7 +194,7 @@ export default function BetsPage() {
 
   // Total bonus points earned so far
   const totalBonus = Object.values(data.points).reduce<number>((sum, p) => sum + (p ?? 0), 0)
-  const maxBonus = 10 + sortedGroups.length * 4 // 10 for champion + 4 per group
+  const maxBonus = 10 + 5 + sortedGroups.length * 4 // champion + scorer + groups
 
   return (
     <div className="space-y-6">
@@ -250,6 +269,121 @@ export default function BetsPage() {
           </div>
         )}
       </div>
+
+      {/* ── Top scorer ── */}
+      {(() => {
+        const scorerLocked = championLocked // same deadline as world champion
+        const scorerResult = data.results['TOP_SCORER']
+        const scorerPoints = data.points['TOP_SCORER']
+        const playerCountries = getPlayerCountries()
+
+        return (
+          <div className="bg-white rounded-lg border border-gray-200 p-4 space-y-3">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <h2 className="font-semibold">⚽ Paras maalintekijä</h2>
+                <p className="text-xs text-gray-400 mt-0.5">5 pistettä oikeasta vastauksesta</p>
+              </div>
+              {scorerPoints !== null && (
+                <span className={`text-sm font-bold shrink-0 ${scorerPoints > 0 ? 'text-green-600' : 'text-gray-400'}`}>
+                  {scorerPoints} / 5 p
+                </span>
+              )}
+            </div>
+
+            {scorerResult && (
+              <p className="text-xs text-gray-500">
+                Oikea vastaus:{' '}
+                <strong>
+                  {isWildcard(scorerResult)
+                    ? `Muu ${getCountry(wildcardCountry(scorerResult)).name} pelaaja`
+                    : scorerResult}
+                </strong>
+              </p>
+            )}
+
+            {scorerLocked ? (
+              <div className="text-sm">
+                {scorerPick ? (
+                  <span className="text-gray-600">
+                    Veikkauksesi:{' '}
+                    <strong>
+                      {isWildcard(scorerPick)
+                        ? `Muu ${getCountry(wildcardCountry(scorerPick)).name} pelaaja`
+                        : scorerPick}
+                    </strong>
+                    <span className="ml-1.5 text-xs text-gray-400">(lukittu)</span>
+                  </span>
+                ) : (
+                  <span className="text-gray-300 text-xs">Et veikannut parasta maalintekijää</span>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <div className="max-h-72 overflow-y-auto rounded-lg border border-gray-200 divide-y divide-gray-100">
+                  {/* Named players */}
+                  {TOP_SCORER_PLAYERS.map(player => {
+                    const { name: countryFi, code } = getCountry(player.country)
+                    const isSelected = scorerPick === player.name
+                    return (
+                      <button
+                        key={player.name}
+                        onClick={() => { setScorerPick(isSelected ? '' : player.name); setSaved(s => ({ ...s, TOP_SCORER: false })) }}
+                        className={`w-full flex items-center gap-2 px-3 py-2 text-left text-sm transition-colors ${
+                          isSelected ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-50'
+                        }`}
+                      >
+                        <span className="text-xs text-gray-300 w-5 shrink-0 text-right">{player.rank}</span>
+                        {code && <img src={flagUrl(code)} alt={countryFi} width={16} height={12} className="rounded-sm shrink-0" />}
+                        <span className="flex-1">{player.name}</span>
+                        <span className="text-xs text-gray-400">{countryFi}</span>
+                        {isSelected && <span className="text-blue-500 text-xs">✓</span>}
+                      </button>
+                    )
+                  })}
+                  {/* Wildcard options per country */}
+                  <div className="bg-gray-50 px-3 py-1.5">
+                    <span className="text-xs font-medium text-gray-400 uppercase tracking-wider">Muu pelaaja maasta</span>
+                  </div>
+                  {playerCountries.map(country => {
+                    const wv = wildcardValue(country)
+                    const { name: countryFi, code } = getCountry(country)
+                    const isSelected = scorerPick === wv
+                    return (
+                      <button
+                        key={wv}
+                        onClick={() => { setScorerPick(isSelected ? '' : wv); setSaved(s => ({ ...s, TOP_SCORER: false })) }}
+                        className={`w-full flex items-center gap-2 px-3 py-2 text-left text-sm transition-colors ${
+                          isSelected ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-50'
+                        }`}
+                      >
+                        <span className="w-5 shrink-0" />
+                        {code && <img src={flagUrl(code)} alt={countryFi} width={16} height={12} className="rounded-sm shrink-0" />}
+                        <span className="flex-1 text-gray-600">Muu {countryFi} pelaaja</span>
+                        {isSelected && <span className="text-blue-500 text-xs">✓</span>}
+                      </button>
+                    )
+                  })}
+                </div>
+
+                {errors['TOP_SCORER'] && <p className="text-xs text-red-600">{errors['TOP_SCORER']}</p>}
+
+                <button
+                  onClick={saveScorer}
+                  disabled={!scorerPick || saving['TOP_SCORER']}
+                  className={`w-full py-2 rounded-lg text-sm font-medium transition-colors ${
+                    saved['TOP_SCORER']
+                      ? 'bg-green-100 text-green-700 border border-green-300'
+                      : 'bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50'
+                  }`}
+                >
+                  {saving['TOP_SCORER'] ? 'Tallennetaan…' : saved['TOP_SCORER'] ? '✓ Tallennettu' : scorerPick ? 'Tallenna' : 'Valitse pelaaja'}
+                </button>
+              </div>
+            )}
+          </div>
+        )
+      })()}
 
       {/* ── Group advance bets ── */}
       <div className="space-y-3">

@@ -67,7 +67,7 @@ export async function POST(request: NextRequest) {
 
   // Determine deadline
   let deadline: string | null = null
-  if (category === 'WORLD_CHAMPION') {
+  if (category === 'WORLD_CHAMPION' || category === 'TOP_SCORER') {
     const { data } = await supabase
       .from('matches')
       .select('kickoff_at')
