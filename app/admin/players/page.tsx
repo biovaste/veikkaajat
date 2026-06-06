@@ -128,11 +128,10 @@ export default function PlayersPage() {
           <div className="flex gap-2 flex-wrap">
             <input
               type="text"
-              required
-              placeholder="Nimi"
+              placeholder="Nimi (vapaaehtoinen — pelaaja voi asettaa itse)"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="flex-1 min-w-36 border border-gray-300 rounded-lg px-3 py-2 text-sm"
+              className="flex-1 min-w-48 border border-gray-300 rounded-lg px-3 py-2 text-sm"
             />
             <input
               type="email"
