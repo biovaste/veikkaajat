@@ -127,7 +127,8 @@ export async function sendReminderDM(
 
 // ─── Stats table ─────────────────────────────────────────────────────────────
 
-export async function sendStatsTable(): Promise<void> {
+export async function sendStatsTable(chatId?: number | string): Promise<void> {
+  const target = String(chatId ?? GROUP_CHAT_ID)
   const admin = createServiceRoleClient()
 
   // Total points and breakdown from scoring_log
@@ -142,7 +143,7 @@ export async function sendStatsTable(): Promise<void> {
     .order('display_name')
 
   if (!profiles) {
-    await sendMessage(GROUP_CHAT_ID, '⚠️ Tilastoja ei saatavilla.')
+    await sendMessage(target, '⚠️ Tilastoja ei saatavilla.')
     return
   }
 
@@ -186,12 +187,13 @@ export async function sendStatsTable(): Promise<void> {
   })
 
   const body = `<code>${colHeader}\n${separator}\n${rows.join('\n')}</code>`
-  await sendMessage(GROUP_CHAT_ID, header + body)
+  await sendMessage(target, header + body)
 }
 
 // ─── Chart image ─────────────────────────────────────────────────────────────
 
-export async function sendChartImage(): Promise<void> {
+export async function sendChartImage(chatId?: number | string): Promise<void> {
+  const target = String(chatId ?? GROUP_CHAT_ID)
   const admin = createServiceRoleClient()
 
   const { data: log } = await admin
@@ -200,7 +202,7 @@ export async function sendChartImage(): Promise<void> {
     .order('match_id', { ascending: true })
 
   if (!log || log.length === 0) {
-    await sendMessage(GROUP_CHAT_ID, '📈 Ei vielä pisteitä piirrettäväksi.')
+    await sendMessage(target, '📈 Ei vielä pisteitä piirrettäväksi.')
     return
   }
 
@@ -257,10 +259,10 @@ export async function sendChartImage(): Promise<void> {
 
   try {
     const url = await getQuickChartUrl(chartConfig, 900, 500)
-    await sendPhoto(GROUP_CHAT_ID, url, '📈 MM 2026 — Pistekehitys')
+    await sendPhoto(target, url, '📈 MM 2026 — Pistekehitys')
   } catch (err) {
     console.error('[chart]', err)
-    await sendMessage(GROUP_CHAT_ID, '⚠️ Kaavio ei onnistu juuri nyt.')
+    await sendMessage(target, '⚠️ Kaavio ei onnistu juuri nyt.')
   }
 }
 

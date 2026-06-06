@@ -42,12 +42,12 @@ export async function POST(request: NextRequest) {
       `Kopioi numero ja liitä se sovelluksen Asetukset-sivulle (⚙), niin saat henkilökohtaiset muistutukset veikkaamattomista otteluista.`
     await sendMessage(chatId, reply).catch(console.error)
   } else if (text === '/chart' && isGroup) {
-    await sendChartImage().catch(async (err) => {
+    await sendChartImage(chatId).catch(async (err) => {
       console.error('[webhook /chart]', err)
       await sendMessage(chatId, '⚠️ Kaavio ei onnistu juuri nyt.').catch(console.error)
     })
   } else if (text === '/stats' && isGroup) {
-    await sendStatsTable().catch(async (err) => {
+    await sendStatsTable(chatId).catch(async (err) => {
       console.error('[webhook /stats]', err)
       await sendMessage(chatId, '⚠️ Tilastot ei onnistu juuri nyt.').catch(console.error)
     })
