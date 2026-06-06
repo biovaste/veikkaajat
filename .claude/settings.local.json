@@ -21,7 +21,8 @@
       "WebFetch(domain:www.api-football.com)",
       "WebFetch(domain:rapidapi.com)",
       "Bash(git -C E:/claude/veikkaajat push)",
-      "Bash(git -C E:/claude/veikkaajat add -A)"
+      "Bash(git -C E:/claude/veikkaajat add -A)",
+      "Bash(git -C E:/claude/veikkaajat add lib/telegram/bot.ts lib/telegram/notify.ts)"
     ]
   }
 }
