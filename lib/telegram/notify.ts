@@ -2,6 +2,7 @@ import { createServiceRoleClient } from '@/lib/supabase/server'
 import { sendMessage, sendPhoto, getQuickChartUrl } from './bot'
 import { getCountry } from '../countries'
 import { isWildcard, wildcardCountry } from '../players'
+import { calculatePoints } from '../scoring/engine'
 
 const GROUP_CHAT_ID = process.env.TELEGRAM_GROUP_CHAT_ID!
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? ''
@@ -133,12 +134,13 @@ export async function sendStatsTable(chatId?: number | string): Promise<void> {
   const target = String(chatId ?? GROUP_CHAT_ID)
   const admin = createServiceRoleClient()
 
-  const [{ data: log }, { data: profiles }, { data: catBets }, { data: preds }, { data: firstMatch }] = await Promise.all([
+  const [{ data: log }, { data: profiles }, { data: catBets }, { data: preds }, { data: firstMatch }, { data: xgMatches }] = await Promise.all([
     admin.from('scoring_log').select('user_id, points, breakdown, match_id, matches(stage, kickoff_at)').order('match_id', { ascending: true }),
     admin.from('profiles').select('id, display_name').order('display_name'),
     admin.from('category_bets').select('user_id, category, bet_value, points'),
-    admin.from('predictions').select('user_id, home_score_pred, away_score_pred, matches(home_score, away_score, status)'),
+    admin.from('predictions').select('user_id, home_score_pred, away_score_pred, match_id, matches(home_score, away_score, status, home_xg, away_xg)'),
     admin.from('matches').select('kickoff_at').order('kickoff_at', { ascending: true }).limit(1).single(),
+    admin.from('matches').select('id, home_xg, away_xg').not('home_xg', 'is', null).not('away_xg', 'is', null),
   ])
 
   // Special bet picks are hidden until the betting deadline (first match kickoff) has passed
@@ -162,6 +164,7 @@ export async function sendStatsTable(chatId?: number | string): Promise<void> {
     draw_preds: number; draw_correct: number
     decisive_preds: number; decisive_correct: number
     lead_count: number
+    xg_pts: number; xg_n: number
     champion_bet: string | null
     scorer_bet: string | null
   }
@@ -174,6 +177,7 @@ export async function sendStatsTable(chatId?: number | string): Promise<void> {
       group_pts: 0, group_n: 0, knockout_pts: 0, knockout_n: 0,
       draw_preds: 0, draw_correct: 0, decisive_preds: 0, decisive_correct: 0,
       lead_count: 0,
+      xg_pts: 0, xg_n: 0,
       champion_bet: null, scorer_bet: null,
     }
   }
@@ -242,16 +246,40 @@ export async function sendStatsTable(chatId?: number | string): Promise<void> {
     }
   }
 
-  // Draw / decisive prediction accuracy
+  // Draw / decisive prediction accuracy + xG-based points
+  // Build a lookup: match_id → { home_xg, away_xg }
+  const xgByMatch: Record<number, { home_xg: number; away_xg: number }> = {}
+  for (const m of xgMatches ?? []) {
+    if (m.home_xg !== null && m.away_xg !== null) {
+      xgByMatch[m.id] = { home_xg: m.home_xg, away_xg: m.away_xg }
+    }
+  }
+  const hasXg = Object.keys(xgByMatch).length > 0
+
   for (const row of preds ?? []) {
     const s = stats[row.user_id]
     if (!s) continue
     const m = Array.isArray(row.matches) ? row.matches[0] : row.matches
     if (!m || m.status !== 'FINISHED' || m.home_score === null || m.away_score === null) continue
+
+    // Draw / decisive accuracy
     const predDraw = row.home_score_pred === row.away_score_pred
     const actualDraw = m.home_score === m.away_score
     if (predDraw) { s.draw_preds++; if (actualDraw) s.draw_correct++ }
     else { s.decisive_preds++; if (!actualDraw) s.decisive_correct++ }
+
+    // xG-based points: recalculate using rounded xG as the "actual" result
+    const xg = xgByMatch[row.match_id]
+    if (xg) {
+      const xgHome = Math.round(xg.home_xg)
+      const xgAway = Math.round(xg.away_xg)
+      const { total } = calculatePoints(
+        { home: row.home_score_pred, away: row.away_score_pred },
+        { home: xgHome, away: xgAway },
+      )
+      s.xg_pts += total
+      s.xg_n += 1
+    }
   }
 
   const sorted = Object.values(stats).sort((a, b) => b.total - a.total)
@@ -264,6 +292,7 @@ export async function sendStatsTable(chatId?: number | string): Promise<void> {
 
   // Build table rows
   const head = ['#', 'Pelaaja', 'Pts', 'KA', 'Tark', 'Mrk%', 'Nol%', 'L-KA', 'J-KA', 'Tas%', 'Ylä%', 'Jht',
+    ...(hasXg ? ['xG-Pts'] : []),
     ...(hasBets ? ['Mestari', 'Maalikuningas'] : [])]
 
   const body = sorted.map((s, i) => {
@@ -284,6 +313,7 @@ export async function sendStatsTable(chatId?: number | string): Promise<void> {
       pct(s.draw_correct, s.draw_preds),
       pct(s.decisive_correct, s.decisive_preds),
       String(s.lead_count),
+      ...(hasXg ? [String(s.xg_pts)] : []),
       ...(hasBets ? [champ, scorer] : []),
     ]
   })

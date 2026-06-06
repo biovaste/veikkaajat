@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient, createServiceRoleClient } from '@/lib/supabase/server'
 import { calculatePoints } from '@/lib/scoring/engine'
 import { sendResultMessage, type LeaderboardRow, type PlayerInfo } from '@/lib/telegram/notify'
+import { findAfFixtureId, fetchFixtureXg } from '@/lib/api-football/client'
 
 export async function POST(request: NextRequest) {
   try {
@@ -45,6 +46,36 @@ export async function POST(request: NextRequest) {
       .from('profiles')
       .select('id, display_name, telegram_chat_id')
       .order('display_name')
+
+    // Fetch xG from API-Football (best-effort, runs before we update the match so we can store it)
+    let xgData: { home_xg: number; away_xg: number } | null = null
+    if (process.env.API_FOOTBALL_KEY) {
+      try {
+        const { data: matchMeta } = await admin
+          .from('matches')
+          .select('kickoff_at, home_team, away_team, af_fixture_id')
+          .eq('id', match_id)
+          .single()
+
+        if (matchMeta) {
+          let afId = matchMeta.af_fixture_id
+          if (!afId) {
+            afId = await findAfFixtureId(matchMeta.kickoff_at, matchMeta.home_team, matchMeta.away_team)
+          }
+          if (afId) {
+            xgData = await fetchFixtureXg(afId)
+            if (xgData) {
+              // Persist af_fixture_id and xG so we don't re-fetch on re-scoring
+              await admin.from('matches').update({ af_fixture_id: afId, ...xgData }).eq('id', match_id)
+            } else if (afId !== matchMeta.af_fixture_id) {
+              await admin.from('matches').update({ af_fixture_id: afId }).eq('id', match_id)
+            }
+          }
+        }
+      } catch (xgErr) {
+        console.warn('[override-result] xG fetch failed (non-fatal):', xgErr)
+      }
+    }
 
     // Update match result (admin RLS policy allows this)
     const { error: matchError } = await supabase

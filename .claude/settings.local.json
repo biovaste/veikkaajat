@@ -11,7 +11,17 @@
       "PowerShell(cd E:\\\\claude\\\\veikkaajat; $env:PATH = [System.Environment]::GetEnvironmentVariable\\(\"PATH\",\"Machine\"\\) + \";\" + [System.Environment]::GetEnvironmentVariable\\(\"PATH\",\"User\"\\); npx tsc --noEmit 2>&1 | head -60)",
       "Bash(git add *)",
       "Bash(git commit -m ' *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(git commit *)",
+      "Bash(npx tsc *)",
+      "Bash(node_modules/.bin/tsc --noEmit)",
+      "Bash(node node_modules/typescript/bin/tsc --noEmit)",
+      "Bash(git -C E:/claude/veikkaajat add lib/telegram/notify.ts)",
+      "Bash(git -C E:/claude/veikkaajat commit -m ' *)",
+      "WebFetch(domain:www.api-football.com)",
+      "WebFetch(domain:rapidapi.com)",
+      "Bash(git -C E:/claude/veikkaajat push)",
+      "Bash(git -C E:/claude/veikkaajat add -A)"
     ]
   }
 }
