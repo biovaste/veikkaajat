@@ -89,7 +89,9 @@ export async function POST(request: NextRequest) {
     const updateError = updateErrors.find((r) => r.error)?.error
     if (updateError) return NextResponse.json({ error: updateError.message }, { status: 500 })
 
-    // Insert scoring_log rows
+    // Replace scoring_log rows for this match (delete old, insert new)
+    await admin.from('scoring_log').delete().eq('match_id', match_id)
+
     const { error: logError } = await admin
       .from('scoring_log')
       .insert(
