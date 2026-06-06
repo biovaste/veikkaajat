@@ -1,5 +1,7 @@
 import { createServiceRoleClient } from '@/lib/supabase/server'
 import { sendMessage, sendPhoto, getQuickChartUrl } from './bot'
+import { getCountry } from '../countries'
+import { isWildcard, wildcardCountry } from '../players'
 
 const GROUP_CHAT_ID = process.env.TELEGRAM_GROUP_CHAT_ID!
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? ''
@@ -131,11 +133,11 @@ export async function sendStatsTable(chatId?: number | string): Promise<void> {
   const target = String(chatId ?? GROUP_CHAT_ID)
   const admin = createServiceRoleClient()
 
-  // Fetch all data in parallel
-  const [{ data: log }, { data: profiles }, { data: catBets }] = await Promise.all([
-    admin.from('scoring_log').select('user_id, points, breakdown'),
+  const [{ data: log }, { data: profiles }, { data: catBets }, { data: preds }] = await Promise.all([
+    admin.from('scoring_log').select('user_id, points, breakdown, match_id, matches(stage)'),
     admin.from('profiles').select('id, display_name').order('display_name'),
-    admin.from('category_bets').select('user_id, points').not('points', 'is', null),
+    admin.from('category_bets').select('user_id, category, bet_value, points'),
+    admin.from('predictions').select('user_id, home_score_pred, away_score_pred, matches(home_score, away_score, status)'),
   ])
 
   if (!profiles) {
@@ -143,59 +145,113 @@ export async function sendStatsTable(chatId?: number | string): Promise<void> {
     return
   }
 
-  // Compute per-player stats
-  type Stats = {
+  type PlayerStats = {
     display_name: string
     total: number
-    bonus: number  // category bet points
+    bonus: number
     matches: number
     exact: number
     correct_result: number
+    zero_matches: number
+    group_pts: number; group_n: number
+    knockout_pts: number; knockout_n: number
+    draw_preds: number; draw_correct: number
+    decisive_preds: number; decisive_correct: number
+    champion_bet: string | null
+    scorer_bet: string | null
   }
-  const stats: Record<string, Stats> = {}
 
+  const stats: Record<string, PlayerStats> = {}
   for (const p of profiles) {
-    stats[p.id] = { display_name: p.display_name, total: 0, bonus: 0, matches: 0, exact: 0, correct_result: 0 }
+    stats[p.id] = {
+      display_name: p.display_name, total: 0, bonus: 0, matches: 0,
+      exact: 0, correct_result: 0, zero_matches: 0,
+      group_pts: 0, group_n: 0, knockout_pts: 0, knockout_n: 0,
+      draw_preds: 0, draw_correct: 0, decisive_preds: 0, decisive_correct: 0,
+      champion_bet: null, scorer_bet: null,
+    }
   }
 
+  // Match points from scoring_log
   for (const row of log ?? []) {
     const s = stats[row.user_id]
     if (!s) continue
     s.total += row.points
     s.matches += 1
+    if (row.points === 0) s.zero_matches += 1
     const b = row.breakdown as { result: number; home_goals: number; away_goals: number }
     if (b.result === 3 && b.home_goals === 1 && b.away_goals === 1) s.exact += 1
     if (b.result === 3) s.correct_result += 1
+    const stage = (Array.isArray(row.matches) ? row.matches[0] : row.matches)?.stage
+    if (stage === 'GROUP_STAGE') { s.group_pts += row.points; s.group_n += 1 }
+    else if (stage) { s.knockout_pts += row.points; s.knockout_n += 1 }
   }
 
+  // Category bets
   for (const row of catBets ?? []) {
     const s = stats[row.user_id]
-    if (!s || row.points === null) continue
-    s.total += row.points
-    s.bonus += row.points
+    if (!s) continue
+    if (row.points !== null) { s.total += row.points; s.bonus += row.points }
+    if (row.category === 'WORLD_CHAMPION') s.champion_bet = row.bet_value
+    if (row.category === 'TOP_SCORER') s.scorer_bet = row.bet_value
+  }
+
+  // Draw / decisive prediction accuracy
+  for (const row of preds ?? []) {
+    const s = stats[row.user_id]
+    if (!s) continue
+    const m = Array.isArray(row.matches) ? row.matches[0] : row.matches
+    if (!m || m.status !== 'FINISHED' || m.home_score === null || m.away_score === null) continue
+    const predDraw = row.home_score_pred === row.away_score_pred
+    const actualDraw = m.home_score === m.away_score
+    if (predDraw) { s.draw_preds++; if (actualDraw) s.draw_correct++ }
+    else { s.decisive_preds++; if (!actualDraw) s.decisive_correct++ }
   }
 
   const sorted = Object.values(stats).sort((a, b) => b.total - a.total)
-  const scoredMatches = Math.max(...Object.values(stats).map(s => s.matches), 0)
-  const hasBonus = (catBets ?? []).length > 0
+  const scoredMatches = Math.max(...sorted.map(s => s.matches), 0)
 
-  // Format as monospace table
-  const header = `📊 <b>Tilastot — ${scoredMatches} ottelua pisteytetty</b>\n\n`
-  const colHeader = hasBonus
-    ? padR('Pelaaja', 14) + padL('Pts', 4) + padL('Bon', 4) + padL('KA', 5) + padL('Tark', 5) + padL('Mrk%', 5)
-    : padR('Pelaaja', 15) + padL('Pts', 4) + padL('KA', 5) + padL('Tark', 5) + padL('Mrk%', 5)
-  const separator = '─'.repeat(hasBonus ? 37 : 34)
+  const pct = (n: number, d: number) => d > 0 ? Math.round(n / d * 100) + '%' : '–'
+  const avg = (pts: number, n: number) => n > 0 ? (pts / n).toFixed(1).replace('.', ',') : '–'
 
-  const rows = sorted.map((s) => {
-    const avg = s.matches > 0 ? (s.total / s.matches).toFixed(1) : '–'
-    const merkki = s.matches > 0 ? Math.round((s.correct_result / s.matches) * 100) + '%' : '–'
-    return hasBonus
-      ? padR(truncate(s.display_name, 13), 14) + padL(String(s.total), 4) + padL(String(s.bonus), 4) + padL(avg, 5) + padL(String(s.exact), 5) + padL(merkki, 5)
-      : padR(truncate(s.display_name, 14), 15) + padL(String(s.total), 4) + padL(avg, 5) + padL(String(s.exact), 5) + padL(merkki, 5)
-  })
+  // ── Message 1: Standings ──────────────────────────────────────────────────
+  const h1 = `📊 <b>Sarjataulukko — ${scoredMatches} ottelua</b>\n\n`
+  const c1 = padR('#', 3) + padR('Pelaaja', 13) + padL('Pts', 4) + padL('KA', 5) + padL('Tark', 5) + padL('Mrk%', 5)
+  const r1 = sorted.map((s, i) =>
+    padR(`${i + 1}.`, 3) + padR(truncate(s.display_name, 12), 13) +
+    padL(String(s.total), 4) + padL(avg(s.total - s.bonus, s.matches), 5) +
+    padL(String(s.exact), 5) + padL(pct(s.correct_result, s.matches), 5)
+  )
+  await sendMessage(target, h1 + `<code>${c1}\n${'─'.repeat(35)}\n${r1.join('\n')}</code>`)
 
-  const body = `<code>${colHeader}\n${separator}\n${rows.join('\n')}</code>`
-  await sendMessage(target, header + body)
+  // ── Message 2: Advanced stats ─────────────────────────────────────────────
+  const h2 = `📈 <b>Lisätilastot</b>\n\n`
+  const c2 = padR('Pelaaja', 13) + padL('Nol%', 5) + padL('L-KA', 5) + padL('J-KA', 5) + padL('Tas%', 5) + padL('Ylä%', 5)
+  const r2 = sorted.map(s =>
+    padR(truncate(s.display_name, 12), 13) +
+    padL(pct(s.zero_matches, s.matches), 5) +
+    padL(avg(s.group_pts, s.group_n), 5) +
+    padL(avg(s.knockout_pts, s.knockout_n), 5) +
+    padL(pct(s.draw_correct, s.draw_preds), 5) +
+    padL(pct(s.decisive_correct, s.decisive_preds), 5)
+  )
+  const legend2 = '\n\n<i>Nol%=nollaottelut, L-KA=lohkovaihe KA, J-KA=jatkopelit KA\nTas%=tasurihakujen osuma, Ylä%=voittohakujen osuma</i>'
+  await sendMessage(target, h2 + `<code>${c2}\n${'─'.repeat(38)}\n${r2.join('\n')}</code>` + legend2)
+
+  // ── Message 3: Special bets ───────────────────────────────────────────────
+  const hasBets = sorted.some(s => s.champion_bet || s.scorer_bet)
+  if (hasBets) {
+    const h3 = `🎯 <b>Erikoisveikkaukset</b>\n\n`
+    const c3 = padR('Pelaaja', 13) + '  ' + padR('Mestari', 12) + '  Maalikuningas'
+    const r3 = sorted.map(s => {
+      const champ = s.champion_bet ? getCountry(s.champion_bet).name : '–'
+      const scorer = s.scorer_bet
+        ? (isWildcard(s.scorer_bet) ? `Muu ${getCountry(wildcardCountry(s.scorer_bet)).name}` : s.scorer_bet)
+        : '–'
+      return padR(truncate(s.display_name, 12), 13) + '  ' + padR(truncate(champ, 11), 12) + '  ' + truncate(scorer, 18)
+    })
+    await sendMessage(target, h3 + `<code>${c3}\n${'─'.repeat(45)}\n${r3.join('\n')}</code>`)
+  }
 }
 
 // ─── Chart image ─────────────────────────────────────────────────────────────
