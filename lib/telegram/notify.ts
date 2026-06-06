@@ -174,7 +174,7 @@ export async function sendStatsTable(): Promise<void> {
   const playedCount = (log ?? []).length > 0 ? new Set((log ?? []).map((r) => r.user_id)).size : 0
 
   // Format as monospace table
-  const scoredMatches = log ? new Set(log.map(r => r.match_id)).size : 0
+  const scoredMatches = sorted[0]?.matches ?? 0
   const header = `📊 <b>Tilastot — ${scoredMatches} ottelua pisteytetty</b>\n\n`
   const colHeader = padR('Pelaaja', 15) + padL('Pts', 4) + padL('KA', 5) + padL('Tark', 5) + padL('Mrk%', 5)
   const separator = '─'.repeat(34)
