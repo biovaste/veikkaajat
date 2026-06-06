@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { getCountry, flagUrl } from '@/lib/countries'
-import { TOP_SCORER_PLAYERS, getPlayerCountries, wildcardValue, isWildcard, wildcardCountry } from '@/lib/players'
+import { TOP_SCORER_PLAYERS, wildcardValue, isWildcard, wildcardCountry } from '@/lib/players'
 import { useRouter } from 'next/navigation'
 
 interface GroupInfo {
@@ -275,7 +275,10 @@ export default function BetsPage() {
         const scorerLocked = championLocked // same deadline as world champion
         const scorerResult = data.results['TOP_SCORER']
         const scorerPoints = data.points['TOP_SCORER']
-        const playerCountries = getPlayerCountries()
+        // All participating countries from the matches table, sorted by Finnish name
+        const playerCountries = Array.from(
+          new Set(Object.values(data.groups).flatMap(g => g.teams))
+        ).sort((a, b) => getCountry(a).name.localeCompare(getCountry(b).name, 'fi'))
 
         return (
           <div className="bg-white rounded-lg border border-gray-200 p-4 space-y-3">

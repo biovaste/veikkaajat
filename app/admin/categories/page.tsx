@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { getCountry, flagUrl } from '@/lib/countries'
-import { TOP_SCORER_PLAYERS, getPlayerCountries, wildcardValue, isWildcard, wildcardCountry } from '@/lib/players'
+import { TOP_SCORER_PLAYERS, wildcardValue, isWildcard, wildcardCountry } from '@/lib/players'
 
 interface GroupInfo {
   teams: string[]
@@ -149,7 +149,7 @@ export default function AdminCategoriesPage() {
           <div className="bg-gray-50 px-3 py-1">
             <span className="text-xs text-gray-400 uppercase tracking-wider">Muu pelaaja</span>
           </div>
-          {getPlayerCountries().map(country => {
+          {allTeams.map(country => {
             const wv = wildcardValue(country)
             const { name: countryFi, code } = getCountry(country)
             const isSelected = scorerInput === wv
