@@ -2,7 +2,7 @@ import { createServerClient } from '@/lib/supabase/server'
 import PointsChart from '@/components/PointsChart'
 import { calculatePoints } from '@/lib/scoring/engine'
 
-export const revalidate = 60
+export const dynamic = 'force-dynamic'
 
 export default async function LeaderboardPage() {
   const supabase = await createServerClient()

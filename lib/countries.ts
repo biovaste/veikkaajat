@@ -164,9 +164,13 @@ export function flagUrl(code: string): string {
 }
 
 /**
- * Translates "Group A" → "Lohko A" etc.
+ * Translates "Group A" or "GROUP_A" → "Ryhmä A" etc.
  */
 export function groupLabel(group: string | null | undefined): string | null {
   if (!group) return null
+  // Handle "GROUP_A" format (football-data.org stores groups this way)
+  const underscoreMatch = group.match(/^GROUP_([A-Z]+)$/i)
+  if (underscoreMatch) return `Ryhmä ${underscoreMatch[1].toUpperCase()}`
+  // Handle "Group A" format
   return group.replace(/^Group\s+/i, 'Ryhmä ')
 }
