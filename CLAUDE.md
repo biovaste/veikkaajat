@@ -194,17 +194,20 @@ npm test           # vitest unit tests
 
 ---
 
-### 🔲 Phase 2 — Predictions
-**Goal:** Players submit and edit score predictions up to kickoff.
+### ✅ Phase 2 — Predictions
+**Status: Complete**
 
-Files to create:
-- `app/api/predictions/route.ts` — GET + POST with kickoff_at server-side guard
-- `components/PredictionForm.tsx` — score input (home : away), submit
-- `components/CountdownTimer.tsx` — client component, time to kickoff
-- `components/MatchCard.tsx` — match display + inline form if pre-kickoff
-- Update `app/matches/page.tsx` — add prediction form per match
+- `app/api/predictions/route.ts` — GET + POST; server-side kickoff guard rejects edits after `kickoff_at`
+- `components/PredictionForm.tsx` — score input (home : away), optimistic save feedback
+- `components/CountdownTimer.tsx` — client component, updates every 30s
+- `components/MatchCard.tsx` — match display with prediction form (pre-kickoff), locked view (post-kickoff), result + points (finished)
+- `app/matches/page.tsx` — loads matches + user predictions in parallel, renders MatchCards
 
-Done when: player submits prediction → in DB; editing before kickoff works; post-kickoff edit rejected by server.
+**Verify:**
+1. `/matches` shows all matches with inline prediction form for future matches
+2. Submit a prediction → "✓" confirmation, DB updated
+3. Edit prediction → updates existing row
+4. Past match shows locked prediction, no form
 
 ---
 
