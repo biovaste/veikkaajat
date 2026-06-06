@@ -59,8 +59,8 @@ export async function POST(request: NextRequest) {
 
     if (matchError) return NextResponse.json({ error: matchError.message }, { status: 500 })
 
-    // Fetch all predictions for this match
-    const { data: predictions, error: predError } = await supabase
+    // Fetch all predictions for this match (service role — sees all users' rows)
+    const { data: predictions, error: predError } = await admin
       .from('predictions')
       .select('id, user_id, home_score_pred, away_score_pred')
       .eq('match_id', match_id)
