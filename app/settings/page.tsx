@@ -148,7 +148,7 @@ export default function SettingsPage() {
         <div>
           <h2 className="text-sm font-medium text-gray-700">Väri pistekaaviossa</h2>
           <p className="text-xs text-gray-400 mt-0.5">
-            Valitse oma värisi. Harmaat värit on jo varattu muille pelaajille.
+            Valitse oma värisi. Lukitut värit on jo varattu muille pelaajille.
           </p>
         </div>
 
@@ -164,7 +164,7 @@ export default function SettingsPage() {
                 onClick={() => pickColor(isMine ? null : hex)}
                 className={`relative w-full aspect-square rounded-md transition-all ${
                   isTaken
-                    ? 'opacity-30 cursor-not-allowed'
+                    ? 'opacity-50 cursor-not-allowed'
                     : isMine
                       ? 'ring-2 ring-offset-1 ring-gray-800 scale-110'
                       : 'hover:scale-110 hover:ring-2 hover:ring-offset-1 hover:ring-gray-400'
@@ -174,6 +174,11 @@ export default function SettingsPage() {
                 {isMine && (
                   <span className="absolute inset-0 flex items-center justify-center text-white text-xs font-bold drop-shadow">
                     ✓
+                  </span>
+                )}
+                {isTaken && (
+                  <span className="absolute inset-0 flex items-center justify-center" style={{ fontSize: '10px' }}>
+                    🔒
                   </span>
                 )}
               </button>

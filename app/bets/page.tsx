@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { getCountry, flagUrl } from '@/lib/countries'
+import { getCountry, flagUrl, groupLabel } from '@/lib/countries'
 import { TOP_SCORER_PLAYERS, wildcardValue, isWildcard, wildcardCountry } from '@/lib/players'
 import { useRouter } from 'next/navigation'
 
@@ -421,7 +421,7 @@ export default function BetsPage() {
       <div className="space-y-3">
         <div>
           <h2 className="font-semibold">Ryhmien jatkajat</h2>
-          <p className="text-xs text-gray-400 mt-0.5">Valitse 2 joukkuetta per ryhmä jotka jatkavat · 4 pistettä per oikea</p>
+          <p className="text-xs text-gray-400 mt-0.5">Valitse 2 jatkoon menevää joukkuetta. 4 pistettä, jos molemmat oikein.</p>
         </div>
 
         {sortedGroups.map(([group, info]) => {
@@ -430,7 +430,7 @@ export default function BetsPage() {
           const groupPoints = data.points[group]
           const groupResult = data.results[group]
           const resultTeams: string[] = groupResult ? JSON.parse(groupResult) : []
-          const groupFi = group.replace('Group ', 'Ryhmä ')
+          const groupFi = groupLabel(group) ?? group
           const remaining = 2 - picks.length
 
           return (

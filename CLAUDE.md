@@ -50,7 +50,7 @@ NEXT_PUBLIC_APP_URL=
 
 ### Special bets (category_bets table)
 - 10 pts — World Champion (deadline: first match kickoff)
-- 5 pts — Top Scorer (deadline: first match kickoff); 50 named players + wildcard per country
+- 5 pts — Top Scorer (deadline: first match kickoff); named players + wildcard per country
 - 4 pts — 2 advancing teams per group (BOTH must be correct; 1 correct = 0 pts; deadline: group's first match)
 
 Scoring engine: `lib/scoring/engine.ts` — pure function, unit-tested.
@@ -58,18 +58,20 @@ Special bet scoring: `app/api/admin/score-categories/route.ts`.
 
 ## Key Architectural Decisions
 
-- **Admin writes**: seed and override API routes use `createServerClient()` (anon key + cookie session). RLS allows writes because `profiles.is_admin = true` for the authenticated user (see migration 0004). `createServiceRoleClient()` is reserved for `auth.admin.*` operations (e.g. inviting users) — it uses `@supabase/supabase-js` `createClient` directly with no cookies. Note: the new Supabase "Secret API key" is NOT the legacy `service_role` JWT and does not bypass RLS — don't confuse them. The edge function bypasses RLS via the service role key directly.
+- **Admin writes**: seed and override API routes use `createServerClient()` (anon key + cookie session). RLS allows writes because `profiles.is_admin = true` for the authenticated user (see migration 0004). `createServiceRoleClient()` is reserved for `auth.admin.*` operations (e.g. inviting users) and for reading all players' predictions in the leaderboard (bypasses `predictions_select_own` RLS). Note: the new Supabase "Secret API key" is NOT the legacy `service_role` JWT and does not bypass RLS — don't confuse them.
 - **Kickoff lock**: enforced both client-side (hide form) and server-side (`POST /api/predictions` rejects if `kickoff_at <= now()`).
 - **No open signup**: admin uses `/admin/players` to invite users via `supabase.auth.admin.inviteUserByEmail()`.
 - **football-data.org rate limit**: 10 req/min. Group stage seed is one bulk call. The edge function polls one match at a time with a 7s sleep between calls.
+- **football-data.org group format**: groups stored as `GROUP_A` (underscore, uppercase). `groupLabel()` in `lib/countries.ts` handles both `GROUP_A` and `Group A` formats → `Ryhmä A`.
 - **Scoring log**: `scoring_log` rows are deleted and re-inserted on every score/re-score to prevent point stacking.
 - **xG**: fetched from api-football.com after each match is scored (best-effort, non-fatal). `af_fixture_id` cached on match row to avoid re-lookup on re-scoring.
-- **Group labels**: football-data.org returns `Group A` etc.; displayed as `Ryhmä A` via `groupLabel()` in `lib/countries.ts`.
+- **Leaderboard page**: uses `force-dynamic` (no ISR) because it reads cookie-based auth. Predictions fetched via service role to get all players' data for Yllätys% and Tas% stats.
+- **Chart colors**: players pick a color from a 20-color palette in /settings. First-come-first-serve enforced by a partial unique index on `profiles.chart_color`. Auto-assigned from remaining pool for players without a pick. Logic in `lib/colors.ts`.
 - **Types**: Supabase client uses untyped `any` generics for now. Run `supabase gen types typescript --project-id <ref> > types/database.ts` after `supabase login` to get proper types.
 
 ## Database Schema
 
-All tables are in `supabase/migrations/`. Migrations 0001–0009 must be applied in order in the Supabase SQL editor.
+All tables are in `supabase/migrations/`. Migrations 0001–0010 must be applied in order in the Supabase SQL editor.
 
 | Table | Purpose |
 |---|---|
@@ -82,6 +84,7 @@ All tables are in `supabase/migrations/`. Migrations 0001–0009 must be applied
 
 **Key columns added by later migrations:**
 - `profiles.telegram_chat_id` — set by player in /settings or admin in /admin/players
+- `profiles.chart_color` — hex string chosen by player in /settings; NULL = auto-assigned
 - `matches.reminder_sent`, `matches.kickoff_msg_sent` — prevent double Telegram messages
 - `matches.af_fixture_id`, `matches.home_xg`, `matches.away_xg` — xG data from api-football.com
 
@@ -98,11 +101,13 @@ app/
   page.tsx                # Redirect → /login or /leaderboard
   login/page.tsx          # Magic link form (Finnish)
   auth/callback/route.ts  # Supabase magic link callback
-  leaderboard/page.tsx    # Points leaderboard (match pts + category bonus)
+  leaderboard/page.tsx    # Leaderboard + cumulative chart + transposed stats table
+                          # force-dynamic; predictions via service role for full stats
   matches/page.tsx        # Fixture list + prediction entry
   my-predictions/page.tsx # Player's own predictions + points
-  bets/page.tsx           # Special bets: champion, top scorer, group advance
-  settings/page.tsx       # Player self-service: display name + Telegram chat ID
+  bets/page.tsx           # Special bets: champion, top scorer (country-grouped + search),
+                          # group advance (wildcard for all tournament countries)
+  settings/page.tsx       # Player self-service: display name, Telegram ID, chart color
   admin/
     layout.tsx            # Guards: redirect non-admins to /leaderboard
     page.tsx              # Admin dashboard links
@@ -116,6 +121,7 @@ components/
   MatchCard.tsx           # Match display with prediction form / locked / result
   PredictionForm.tsx      # Score input (home : away), optimistic save
   CountdownTimer.tsx      # Client component, updates every 30s
+  PointsChart.tsx         # Recharts line chart; accepts colors[] prop (one per player)
 
 lib/
   supabase/
@@ -126,15 +132,19 @@ lib/
   telegram/
     bot.ts                # sendMessage(), sendPhoto(), sendPhotoBuffer(), getQuickChartUrl()
     notify.ts             # sendKickoffMessage(), sendResultMessage(), sendReminderDM(),
-                          # sendStatsTable() (QuickChart table image), sendChartImage()
+                          # sendStatsTable() — text summary + link to /leaderboard
   scoring/engine.ts       # calculatePoints() — pure function, unit-tested
-  players.ts              # TOP_SCORER_PLAYERS list (50 players), wildcard helpers
-  countries.ts            # getCountry(), flagUrl(), groupLabel() (Group X → Ryhmä X)
+  players.ts              # TOP_SCORER_PLAYERS list (~54 players, no rank field),
+                          # sorted by Finnish country name; wildcard helpers
+  countries.ts            # getCountry(), flagUrl(), groupLabel()
+                          # groupLabel handles both "GROUP_A" and "Group A" → "Ryhmä A"
+  colors.ts               # CHART_COLORS (20-color palette), assignColors()
   utils.ts                # formatDate (Finnish), stageLabel(), resultLabel()
 
 app/api/
   predictions/route.ts            # GET + POST predictions
   category-bets/route.ts          # GET + POST special bets (deadline enforced server-side)
+  profile/color/route.ts          # POST: pick/release chart color (unique constraint enforced)
   admin/seed-matches/route.ts     # POST: import from football-data.org
   admin/override-result/route.ts  # POST: set result + score + fetch xG + notify Telegram
   admin/score-categories/route.ts # POST: set category result + score all bets
@@ -153,9 +163,10 @@ supabase/
     0004_matches_admin_policies.sql
     0005_telegram_fields.sql      # telegram_chat_id on profiles; reminder_sent/kickoff_msg_sent on matches
     0006_onboarded.sql
-    0007_leaderboard_rls.sql
+    0007_leaderboard_rls.sql      # scoring_log readable by all authenticated users
     0008_category_bets.sql        # category_bets + category_results tables + RLS
     0009_xg_columns.sql           # af_fixture_id, home_xg, away_xg on matches
+    0010_chart_color.sql          # chart_color on profiles + partial unique index
   functions/
     poll-match-results/index.ts      # Deno: polls football-data.org, scores, fetches xG, sends result message
     check-upcoming-matches/index.ts  # Deno: sends reminder DMs + kickoff group message
@@ -163,6 +174,41 @@ supabase/
 types/
   database.ts            # Hand-written types (replace with supabase gen types)
 ```
+
+## Leaderboard Stats Table
+
+Transposed layout: stats = rows, players = columns (names rotated 90°).
+Leader column tinted yellow, own column tinted blue.
+
+| Column | Description |
+|---|---|
+| Pts | Total points (match + bonus) |
+| KA | Points per match average (match predictions only) |
+| Tark | Exact scores (correct result + both goal tallies) |
+| Mrk% | Correct result % |
+| Nol% | Zero-point match % |
+| L-KA | Group stage average |
+| J-KA | Knockout stage average |
+| Tas% | Draw prediction accuracy (own predictions only) |
+| Yllätys% | Correct result when ≤25% of players predicted the same sign. Only minority picks count toward the denominator — majority picks (>25%) are ignored entirely. |
+| Jht | Calendar days in the lead (10:00 Helsinki cutoff, UTC−7 shift) |
+| xG-Pts | Points if actual scores were rounded xG values (shown when xG data available) |
+| Bonus | Category bet bonus (shown after betting deadline if any scored) |
+
+## Top Scorer Player List
+
+`lib/players.ts` — ~54 named players, no `rank` field, sorted alphabetically by Finnish country name then surname within country. Player list covers: Netherlands, Argentina, Belgium, Brazil, Ecuador, Egypt, England, Spain, South Korea, Canada, Colombia, Mexico, Norway, Portugal, France, Sweden, Germany, Uruguay, United States. Wildcard option available for all tournament countries (including those with no named players) — sourced from `data.groups` in the bets page.
+
+## Chart Color System
+
+`lib/colors.ts` — 20-color palette (`CHART_COLORS`, `CHART_COLOR_HEXES`), `assignColors()`.
+
+- Players pick a color in `/settings` via `POST /api/profile/color`
+- Stored as `profiles.chart_color` (hex string or NULL)
+- Unique partial index (`WHERE chart_color IS NOT NULL`) enforces first-come-first-serve at DB level
+- API returns 409 on conflict (color already taken)
+- `assignColors()`: explicit picks first, remaining pool filled in order for unassigned players
+- `PointsChart` accepts `colors?: string[]` prop — one color per player in sorted order
 
 ## football-data.org Endpoints
 
@@ -197,7 +243,7 @@ Bot: `@veikkaajat_apumarko_bot`
 
 **Commands (group):**
 - `/chart` — cumulative points line chart image (QuickChart.io)
-- `/stats` — full stats table image: pts, KA, exact scores, correct result %, zero-match %, group/knockout avg, draw/decisive accuracy %, days in lead, xG-pts (when available), champion/scorer picks (after deadline)
+- `/stats` — text summary (rank, pts, KA, exact, days in lead) + link to /leaderboard
 - `/help` — lists commands
 
 **Commands (DM):**
@@ -243,13 +289,13 @@ npm test           # vitest unit tests
 
 ### ✅ Phase 4 — Telegram Bot
 - Kickoff messages, result messages with leaderboard arrows, reminder DMs
-- `/chart`, `/stats` (QuickChart table image), `/help`, `/start` commands
+- `/chart`, `/stats` (text + link to /leaderboard), `/help`, `/start` commands
 - Webhook at `/api/telegram/webhook` (excludes /api/ from auth redirect in proxy.ts)
 - Players self-register Telegram ID via `/settings` page
 
 ### ✅ Phase 4b — Special Bets
 - `category_bets` + `category_results` tables (migration 0008)
-- `/bets` page: World Champion, Top Scorer (50 players + all-country wildcards), group advance
+- `/bets` page: World Champion, Top Scorer (country-grouped with search, wildcards for all tournament countries), group advance
 - `/admin/categories` page for admin scoring
 - Deadline enforced server-side (first match kickoff for champion/scorer, group's first match for group bets)
 - Category bonus included in leaderboard totals and `/stats`
@@ -259,6 +305,16 @@ npm test           # vitest unit tests
 - `check-upcoming-matches` edge function: runs every 5 min, sends reminder DMs and kickoff messages
 - pg_cron jobs registered in Supabase
 - xG fetched from api-football.com and stored on match row (`af_fixture_id` cached)
+
+### ✅ Phase 5b — Leaderboard & Stats
+- Leaderboard: `force-dynamic`, auth guard, all-player predictions via service role
+- Transposed stats table (stats = rows, players = columns with rotated names)
+- Stats: Pts, KA, Tark, Mrk%, Nol%, L-KA, J-KA, Tas%, Yllätys%, Jht, xG-Pts, Bonus
+- Yllätys%: correct result when ≤25% of players predicted same result sign (minority-pick based)
+- Cumulative points line chart always visible (empty until first match scored)
+- Player-chosen chart colors (20-color palette, first-come-first-serve, stored in DB)
+  - `lib/colors.ts`, `app/api/profile/color/route.ts`, migration 0010
+  - Color picker in `/settings`
 
 ### 🔲 Phase 6 — UI Polish
 - Responsive pass on all pages
