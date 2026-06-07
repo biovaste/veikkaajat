@@ -11,6 +11,11 @@ export const TOP_SCORER_PLAYERS: Player[] = [
   { name: 'Cody Gakpo',            country: 'Netherlands' },
   { name: 'Donyell Malen',         country: 'Netherlands' },
 
+  // Argentiina (Argentina)
+  { name: 'Julián Álvarez',        country: 'Argentina' },
+  { name: 'Lautaro Martínez',      country: 'Argentina' },
+  { name: 'Lionel Messi',          country: 'Argentina' },
+
   // Algeria
   { name: 'Riyad Mahrez',          country: 'Algeria' },
 
@@ -143,8 +148,8 @@ export const TOP_SCORER_PLAYERS: Player[] = [
   // Tshekki (Czech Republic)
   { name: 'Patrik Schick',         country: 'Czech Republic' },
 
-  // Turkki (Türkiye)
-  { name: 'Kerem Aktürkoğlu',      country: 'Türkiye' },
+  // Turkki (Turkey / Türkiye)
+  { name: 'Kerem Aktürkoğlu',      country: 'Turkey' },
 
   // Uruguay
   { name: 'Darwin Núñez',          country: 'Uruguay' },
