@@ -65,6 +65,45 @@ function TelegramIdCell({ player, onSaved }: { player: Player; onSaved: () => vo
   )
 }
 
+function LoginLinkButton({ email }: { email: string }) {
+  const [state, setState] = useState<'idle' | 'loading' | 'copied' | 'error'>('idle')
+
+  async function generate() {
+    setState('loading')
+    try {
+      const res = await fetch('/api/admin/generate-login-link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setState('error'); return }
+      await navigator.clipboard.writeText(data.link)
+      setState('copied')
+      setTimeout(() => setState('idle'), 3000)
+    } catch {
+      setState('error')
+      setTimeout(() => setState('idle'), 3000)
+    }
+  }
+
+  return (
+    <button
+      onClick={generate}
+      disabled={state === 'loading'}
+      className={`text-xs px-2 py-1 rounded transition-colors whitespace-nowrap ${
+        state === 'copied'
+          ? 'bg-green-100 text-green-700'
+          : state === 'error'
+            ? 'bg-red-100 text-red-600'
+            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+      }`}
+    >
+      {state === 'loading' ? '...' : state === 'copied' ? '✓ Kopioitu' : state === 'error' ? 'Virhe' : 'Kopioi linkki'}
+    </button>
+  )
+}
+
 export default function PlayersPage() {
   const [players, setPlayers] = useState<Player[]>([])
   const [loading, setLoading] = useState(true)
@@ -177,6 +216,7 @@ export default function PlayersPage() {
                 <th className="text-left px-4 py-2 font-medium text-gray-600 hidden sm:table-cell">Sähköposti</th>
                 <th className="text-left px-4 py-2 font-medium text-gray-600">Telegram</th>
                 <th className="text-right px-4 py-2 font-medium text-gray-600">Veikkauksia</th>
+                <th className="px-4 py-2"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -191,6 +231,9 @@ export default function PlayersPage() {
                     <TelegramIdCell player={p} onSaved={loadPlayers} />
                   </td>
                   <td className="px-4 py-2.5 text-right text-gray-600">{p.prediction_count}</td>
+                  <td className="px-4 py-2.5 text-right">
+                    <LoginLinkButton email={p.email} />
+                  </td>
                 </tr>
               ))}
             </tbody>

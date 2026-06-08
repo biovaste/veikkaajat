@@ -71,7 +71,7 @@ Special bet scoring: `app/api/admin/score-categories/route.ts`.
 
 ## Database Schema
 
-All tables are in `supabase/migrations/`. Migrations 0001–0010 must be applied in order in the Supabase SQL editor.
+All tables are in `supabase/migrations/`. Migrations 0001–0011 must be applied in order in the Supabase SQL editor.
 
 | Table | Purpose |
 |---|---|
@@ -85,6 +85,7 @@ All tables are in `supabase/migrations/`. Migrations 0001–0010 must be applied
 **Key columns added by later migrations:**
 - `profiles.telegram_chat_id` — set by player in /settings or admin in /admin/players
 - `profiles.chart_color` — hex string chosen by player in /settings; NULL = auto-assigned
+- `profiles.clan` — 'Beeläiset' | 'Ceeläiset' | 'Independents' | NULL; chosen by player in /settings
 - `matches.reminder_sent`, `matches.kickoff_msg_sent` — prevent double Telegram messages
 - `matches.af_fixture_id`, `matches.home_xg`, `matches.away_xg` — xG data from api-football.com
 
@@ -107,7 +108,7 @@ app/
   my-predictions/page.tsx # Player's own predictions + points
   bets/page.tsx           # Special bets: champion, top scorer (country-grouped + search),
                           # group advance (wildcard for all tournament countries)
-  settings/page.tsx       # Player self-service: display name, Telegram ID, chart color
+  settings/page.tsx       # Player self-service: display name, Telegram ID, chart color, clan
   admin/
     layout.tsx            # Guards: redirect non-admins to /leaderboard
     page.tsx              # Admin dashboard links
@@ -133,8 +134,9 @@ lib/
     bot.ts                # sendMessage(), sendPhoto(), sendPhotoBuffer(), getQuickChartUrl()
     notify.ts             # sendKickoffMessage(), sendResultMessage(), sendReminderDM(),
                           # sendStatsTable() — text summary + link to /leaderboard
+                          # sendClanWar() — clan rankings for /luokkasota command
   scoring/engine.ts       # calculatePoints() — pure function, unit-tested
-  players.ts              # TOP_SCORER_PLAYERS list (~54 players, no rank field),
+  players.ts              # TOP_SCORER_PLAYERS list (~80 players, no rank field),
                           # sorted by Finnish country name; wildcard helpers
   countries.ts            # getCountry(), flagUrl(), groupLabel()
                           # groupLabel handles both "GROUP_A" and "Group A" → "Ryhmä A"
@@ -150,7 +152,7 @@ app/api/
   admin/score-categories/route.ts # POST: set category result + score all bets
   admin/invite-player/route.ts    # POST: send magic link invite
   telegram/
-    webhook/route.ts              # Telegram bot webhook — /start, /chart, /stats, /help
+    webhook/route.ts              # Telegram bot webhook — /start, /chart, /stats, /luokkasota, /help
 
 proxy.ts                # Next.js proxy (was: middleware): session refresh + auth redirect
                         # Excludes /api/ routes so Telegram webhook isn't redirected to /login
@@ -167,6 +169,7 @@ supabase/
     0008_category_bets.sql        # category_bets + category_results tables + RLS
     0009_xg_columns.sql           # af_fixture_id, home_xg, away_xg on matches
     0010_chart_color.sql          # chart_color on profiles + partial unique index
+    0011_clan.sql                 # clan on profiles (CHECK constraint, 3 allowed values)
   functions/
     poll-match-results/index.ts      # Deno: polls football-data.org, scores, fetches xG, sends result message
     check-upcoming-matches/index.ts  # Deno: sends reminder DMs + kickoff group message
@@ -197,7 +200,7 @@ Leader column tinted yellow, own column tinted blue.
 
 ## Top Scorer Player List
 
-`lib/players.ts` — ~54 named players, no `rank` field, sorted alphabetically by Finnish country name then surname within country. Player list covers: Netherlands, Argentina, Belgium, Brazil, Ecuador, Egypt, England, Spain, South Korea, Canada, Colombia, Mexico, Norway, Portugal, France, Sweden, Germany, Uruguay, United States. Wildcard option available for all tournament countries (including those with no named players) — sourced from `data.groups` in the bets page.
+`lib/players.ts` — ~80 named players, no `rank` field, sorted alphabetically by Finnish country name then surname within country. Countries covered include: Netherlands, Argentina, Algeria, Australia, Belgium, Bosnia and Herzegovina, Brazil, Ecuador, Egypt, England, Spain, South Africa, South Korea, Ghana, Haiti, Iran, Austria, Japan, Canada, Colombia, DR Congo, Croatia, Morocco, Mexico, Norway, Ivory Coast, Paraguay, Portugal, France, Sweden, Germany, Senegal, Scotland, Switzerland, Czech Republic, Turkey, Uruguay, New Zealand, Uzbekistan, United States. Wildcard option available for all tournament countries (including those with no named players) — sourced from `data.groups` in the bets page.
 
 ## Chart Color System
 
@@ -244,6 +247,7 @@ Bot: `@veikkaajat_apumarko_bot`
 **Commands (group):**
 - `/chart` — cumulative points line chart image (QuickChart.io)
 - `/stats` — text summary (rank, pts, KA, exact, days in lead) + link to /leaderboard
+- `/luokkasota` — clan rankings: total + average pts per clan, members listed under each
 - `/help` — lists commands
 
 **Commands (DM):**
@@ -305,6 +309,12 @@ npm test           # vitest unit tests
 - `check-upcoming-matches` edge function: runs every 5 min, sends reminder DMs and kickoff messages
 - pg_cron jobs registered in Supabase
 - xG fetched from api-football.com and stored on match row (`af_fixture_id` cached)
+
+### ✅ Phase 5c — Clan War
+- `profiles.clan` column (migration 0011): 'Beeläiset' | 'Ceeläiset' | 'Independents' | NULL
+- Players pick their clan in `/settings` (radio buttons, saveable independently)
+- `/luokkasota` Telegram command: clan totals + averages (ranked by avg), members listed per clan
+- `sendClanWar()` in `lib/telegram/notify.ts`
 
 ### ✅ Phase 5b — Leaderboard & Stats
 - Leaderboard: `force-dynamic`, auth guard, all-player predictions via service role
