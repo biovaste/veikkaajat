@@ -1,6 +1,7 @@
 import { createServerClient, createServiceRoleClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import PointsChart from '@/components/PointsChart'
+import ChatBox from '@/components/ChatBox'
 import { calculatePoints } from '@/lib/scoring/engine'
 import { assignColors } from '@/lib/colors'
 
@@ -370,6 +371,8 @@ export default async function LeaderboardPage() {
           )}
         </>
       )}
+      {/* ── Chat ── */}
+      <ChatBox myId={myId} />
     </div>
   )
 }
