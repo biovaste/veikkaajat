@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { sendMessage, sendPhoto, getQuickChartUrl } from '@/lib/telegram/bot'
-import { sendStatsTable, sendChartImage } from '@/lib/telegram/notify'
+import { sendStatsTable, sendChartImage, sendClanWar } from '@/lib/telegram/notify'
 import { createServiceRoleClient } from '@/lib/supabase/server'
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN!
@@ -51,10 +51,15 @@ export async function POST(request: NextRequest) {
       console.error('[webhook /stats]', err)
       await sendMessage(chatId, '⚠️ Tilastot ei onnistu juuri nyt.').catch(console.error)
     })
+  } else if (text === '/luokkasota' && isGroup) {
+    await sendClanWar(chatId).catch(async (err) => {
+      console.error('[webhook /luokkasota]', err)
+      await sendMessage(chatId, '⚠️ Luokkasota ei onnistu juuri nyt.').catch(console.error)
+    })
   } else if (text === '/help') {
     await sendMessage(
       chatId,
-      '📋 <b>Komennot (ryhmässä):</b>\n/chart — pistekehityskaavio\n/stats — tilastotaulukko\n\n' +
+      '📋 <b>Komennot (ryhmässä):</b>\n/chart — pistekehityskaavio\n/stats — tilastotaulukko\n/luokkasota — klaanien pistetilanne\n\n' +
       'Veikkaa: ' + (process.env.NEXT_PUBLIC_APP_URL ?? ''),
     ).catch(console.error)
   }

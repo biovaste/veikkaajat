@@ -378,6 +378,83 @@ export async function sendChartImage(chatId?: number | string): Promise<void> {
   }
 }
 
+// ─── Clan war ────────────────────────────────────────────────────────────────
+
+const CLAN_EMOJI: Record<string, string> = {
+  'Beeläiset':   '🅱️',
+  'Ceeläiset':   '©️',
+  'Independents': '🏴',
+}
+
+export async function sendClanWar(chatId?: number | string): Promise<void> {
+  const target = String(chatId ?? GROUP_CHAT_ID)
+  const admin = createServiceRoleClient()
+
+  const [{ data: profiles }, { data: log }, { data: catBets }] = await Promise.all([
+    admin.from('profiles').select('id, display_name, clan').order('display_name'),
+    admin.from('scoring_log').select('user_id, points'),
+    admin.from('category_bets').select('user_id, points'),
+  ])
+
+  if (!profiles) {
+    await sendMessage(target, '⚠️ Tietoja ei saatavilla.')
+    return
+  }
+
+  // Total points per player
+  const pts: Record<string, number> = {}
+  for (const p of profiles) pts[p.id] = 0
+  for (const row of log ?? [])     pts[row.user_id] = (pts[row.user_id] ?? 0) + row.points
+  for (const row of catBets ?? []) pts[row.user_id] = (pts[row.user_id] ?? 0) + (row.points ?? 0)
+
+  // Group by clan
+  const CLANS = ['Beeläiset', 'Ceeläiset', 'Independents']
+  const groups: Record<string, { display_name: string; total: number }[]> = {
+    'Beeläiset': [], 'Ceeläiset': [], 'Independents': [],
+  }
+  const noClan: { display_name: string; total: number }[] = []
+
+  for (const p of profiles) {
+    const entry = { display_name: p.display_name, total: pts[p.id] ?? 0 }
+    if (p.clan && CLANS.includes(p.clan as string)) {
+      groups[p.clan as string].push(entry)
+    } else {
+      noClan.push(entry)
+    }
+  }
+
+  // Sort members within each clan by points desc
+  for (const clan of CLANS) groups[clan].sort((a, b) => b.total - a.total)
+
+  // Clan totals and averages
+  const clanStats = CLANS.map(clan => {
+    const members = groups[clan]
+    const total = members.reduce((s, m) => s + m.total, 0)
+    const avg = members.length > 0 ? total / members.length : 0
+    return { clan, members, total, avg }
+  }).sort((a, b) => b.avg - a.avg) // rank by average (fairer if unequal sizes)
+
+  let text = '⚔️ <b>Luokkasota</b>\n\n'
+
+  for (let i = 0; i < clanStats.length; i++) {
+    const { clan, members, total, avg } = clanStats[i]
+    const emoji = CLAN_EMOJI[clan] ?? '🏳️'
+    const rank = i === 0 ? '🥇' : i === 1 ? '🥈' : '🥉'
+    text += `${rank} ${emoji} <b>${clan}</b> — ${total} p  KA ${avg.toFixed(1).replace('.', ',')}\n`
+    for (const m of members) {
+      text += `   ${m.display_name} — ${m.total} p\n`
+    }
+    if (members.length === 0) text += `   <i>Ei jäseniä</i>\n`
+    text += '\n'
+  }
+
+  if (noClan.length > 0) {
+    text += `<i>Ilman luokkaa: ${noClan.map(m => m.display_name).join(', ')}</i>`
+  }
+
+  await sendMessage(target, text.trim())
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function padR(s: string, len: number) { return s.slice(0, len).padEnd(len) }

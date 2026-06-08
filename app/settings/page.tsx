@@ -23,6 +23,12 @@ export default function SettingsPage() {
   const [colorError, setColorError] = useState<string | null>(null)
   const [colorSaved, setColorSaved] = useState(false)
 
+  // Clan
+  const [clan, setClan] = useState<string>('')
+  const [clanSaving, setClanSaving] = useState(false)
+  const [clanSaved, setClanSaved] = useState(false)
+  const [clanError, setClanError] = useState<string | null>(null)
+
   useEffect(() => {
     async function load() {
       const { data: { user } } = await supabase.auth.getUser()
@@ -30,7 +36,7 @@ export default function SettingsPage() {
 
       // Fetch own profile + all taken colors from other players
       const [{ data: profile }, { data: allColors }] = await Promise.all([
-        supabase.from('profiles').select('display_name, telegram_chat_id, chart_color').eq('id', user.id).single(),
+        supabase.from('profiles').select('display_name, telegram_chat_id, chart_color, clan').eq('id', user.id).single(),
         supabase.from('profiles').select('chart_color').not('chart_color', 'is', null).neq('id', user.id),
       ])
 
@@ -38,6 +44,7 @@ export default function SettingsPage() {
         setDisplayName(profile.display_name ?? '')
         setTelegramId(profile.telegram_chat_id ?? '')
         setMyColor(profile.chart_color ?? null)
+        setClan((profile as any).clan ?? '')
       }
       setTakenColors(new Set((allColors ?? []).map(r => r.chart_color as string)))
       setLoading(false)
@@ -89,6 +96,21 @@ export default function SettingsPage() {
       setMyColor(hex)
       setColorSaved(true)
     }
+  }
+
+  async function saveClan(value: string) {
+    setClanSaving(true)
+    setClanError(null)
+    setClanSaved(false)
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+    const { error: err } = await supabase
+      .from('profiles')
+      .update({ clan: value || null } as any)
+      .eq('id', user.id)
+    setClanSaving(false)
+    if (err) setClanError('Tallennus epäonnistui.')
+    else { setClan(value); setClanSaved(true) }
   }
 
   if (loading) return <div className="text-gray-400 text-sm">Ladataan...</div>
@@ -211,6 +233,54 @@ export default function SettingsPage() {
 
         {colorError && <p className="text-xs text-red-600">{colorError}</p>}
         {colorSaved && <p className="text-xs text-green-600">✓ Väri tallennettu</p>}
+      </div>
+
+      {/* ── Clan ── */}
+      <div className="bg-white rounded-lg border border-gray-200 p-4 space-y-3">
+        <div>
+          <h2 className="text-sm font-medium text-gray-700">Luokka</h2>
+          <p className="text-xs text-gray-400 mt-0.5">Valitse klaanisi luokkasotaa varten.</p>
+        </div>
+        <div className="flex flex-col gap-2">
+          {['Beeläiset', 'Ceeläiset', 'Independents'].map(option => (
+            <label key={option} className="flex items-center gap-2.5 cursor-pointer">
+              <input
+                type="radio"
+                name="clan"
+                value={option}
+                checked={clan === option}
+                onChange={() => { setClan(option); setClanSaved(false) }}
+                className="accent-blue-600"
+              />
+              <span className="text-sm text-gray-700">{option}</span>
+            </label>
+          ))}
+          {clan && (
+            <label className="flex items-center gap-2.5 cursor-pointer mt-1">
+              <input
+                type="radio"
+                name="clan"
+                value=""
+                checked={clan === ''}
+                onChange={() => { setClan(''); setClanSaved(false) }}
+                className="accent-blue-600"
+              />
+              <span className="text-sm text-gray-400 italic">Ei luokkaa</span>
+            </label>
+          )}
+        </div>
+        {clanError && <p className="text-xs text-red-600">{clanError}</p>}
+        <button
+          onClick={() => saveClan(clan)}
+          disabled={clanSaving}
+          className={`w-full py-2 px-4 rounded-lg text-sm font-medium transition-colors ${
+            clanSaved
+              ? 'bg-green-100 text-green-700 border border-green-300'
+              : 'bg-blue-600 text-white hover:bg-blue-700'
+          }`}
+        >
+          {clanSaving ? 'Tallennetaan…' : clanSaved ? '✓ Tallennettu' : 'Tallenna'}
+        </button>
       </div>
 
       <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 space-y-1">
