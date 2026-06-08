@@ -31,7 +31,7 @@ export default function ChatBox({ myId }: Props) {
         .select('id, user_id, message, created_at, profiles(display_name)')
         .order('created_at', { ascending: true })
         .limit(200)
-      if (data) setMessages(data as Message[])
+      if (data) setMessages(data as unknown as Message[])
     }
     load()
   }, [])
@@ -50,7 +50,7 @@ export default function ChatBox({ myId }: Props) {
             .select('id, user_id, message, created_at, profiles(display_name)')
             .eq('id', (payload.new as { id: number }).id)
             .single()
-          if (data) setMessages(prev => [...prev, data as Message])
+          if (data) setMessages(prev => [...prev, data as unknown as Message])
         },
       )
       .on(
