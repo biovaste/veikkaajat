@@ -12,6 +12,9 @@ export interface Database {
           email: string
           display_name: string
           is_admin: boolean
+          telegram_chat_id: string | null
+          chart_color: string | null
+          clan: 'Beeläiset' | 'Ceeläiset' | 'Independents' | null
           created_at: string
         }
         Insert: {
@@ -19,6 +22,9 @@ export interface Database {
           email: string
           display_name: string
           is_admin?: boolean
+          telegram_chat_id?: string | null
+          chart_color?: string | null
+          clan?: 'Beeläiset' | 'Ceeläiset' | 'Independents' | null
           created_at?: string
         }
         Update: {
@@ -26,6 +32,9 @@ export interface Database {
           email?: string
           display_name?: string
           is_admin?: boolean
+          telegram_chat_id?: string | null
+          chart_color?: string | null
+          clan?: 'Beeläiset' | 'Ceeläiset' | 'Independents' | null
           created_at?: string
         }
         Relationships: []
@@ -44,6 +53,11 @@ export interface Database {
           home_score: number | null
           away_score: number | null
           result_confirmed_at: string | null
+          reminder_sent: boolean
+          kickoff_msg_sent: boolean
+          af_fixture_id: number | null
+          home_xg: number | null
+          away_xg: number | null
           created_at: string
         }
         Insert: {
@@ -59,6 +73,11 @@ export interface Database {
           home_score?: number | null
           away_score?: number | null
           result_confirmed_at?: string | null
+          reminder_sent?: boolean
+          kickoff_msg_sent?: boolean
+          af_fixture_id?: number | null
+          home_xg?: number | null
+          away_xg?: number | null
           created_at?: string
         }
         Update: {
@@ -74,6 +93,11 @@ export interface Database {
           home_score?: number | null
           away_score?: number | null
           result_confirmed_at?: string | null
+          reminder_sent?: boolean
+          kickoff_msg_sent?: boolean
+          af_fixture_id?: number | null
+          home_xg?: number | null
+          away_xg?: number | null
           created_at?: string
         }
         Relationships: []
@@ -179,6 +203,56 @@ export interface Database {
           created_at?: string
         }
         Relationships: []
+      }
+      category_results: {
+        Row: {
+          id: number
+          category: string
+          result_value: string
+          created_at: string
+        }
+        Insert: {
+          id?: number
+          category: string
+          result_value: string
+          created_at?: string
+        }
+        Update: {
+          id?: number
+          category?: string
+          result_value?: string
+          created_at?: string
+        }
+        Relationships: []
+      }
+      chat_messages: {
+        Row: {
+          id: number
+          user_id: string
+          message: string
+          created_at: string
+        }
+        Insert: {
+          id?: number
+          user_id: string
+          message: string
+          created_at?: string
+        }
+        Update: {
+          id?: number
+          user_id?: string
+          message?: string
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chat_messages_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          }
+        ]
       }
     }
     Views: { [_ in never]: never }

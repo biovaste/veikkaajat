@@ -165,19 +165,6 @@ export const TOP_SCORER_PLAYERS: Player[] = [
   { name: 'Christian Pulisic',     country: 'United States' },
 ]
 
-// Countries in the list, preserving sorted order
-export function getPlayerCountries(): string[] {
-  const seen = new Set<string>()
-  const result: string[] = []
-  for (const p of TOP_SCORER_PLAYERS) {
-    if (!seen.has(p.country)) {
-      seen.add(p.country)
-      result.push(p.country)
-    }
-  }
-  return result
-}
-
 export function getPlayerByName(name: string): Player | undefined {
   return TOP_SCORER_PLAYERS.find(p => p.name === name)
 }

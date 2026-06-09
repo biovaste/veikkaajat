@@ -3,17 +3,10 @@ import { sendMessage, sendPhoto, sendPhotoBuffer, getQuickChartUrl } from './bot
 import { getCountry } from '../countries'
 import { isWildcard, wildcardCountry } from '../players'
 import { calculatePoints } from '../scoring/engine'
+import { CHART_COLOR_HEXES } from '../colors'
 
 const GROUP_CHAT_ID = process.env.TELEGRAM_GROUP_CHAT_ID!
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? ''
-
-// Colours matching PointsChart.tsx
-const COLOURS = [
-  '#2563eb', '#dc2626', '#d97706', '#16a34a', '#9333ea',
-  '#0891b2', '#db2777', '#65a30d', '#ea580c', '#0d9488',
-  '#7c3aed', '#b45309', '#15803d', '#1d4ed8', '#be185d',
-  '#0369a1', '#92400e', '#166534', '#6d28d9', '#9f1239',
-]
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -351,7 +344,7 @@ export async function sendChartImage(chatId?: number | string): Promise<void> {
       datasets: players.map((name, i) => ({
         label: name,
         data: datasets[i].data,
-        borderColor: COLOURS[i % COLOURS.length],
+        borderColor: CHART_COLOR_HEXES[i % CHART_COLOR_HEXES.length],
         backgroundColor: 'transparent',
         fill: false,
         tension: 0,

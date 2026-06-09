@@ -44,7 +44,7 @@ export default function SettingsPage() {
         setDisplayName(profile.display_name ?? '')
         setTelegramId(profile.telegram_chat_id ?? '')
         setMyColor(profile.chart_color ?? null)
-        setClan((profile as any).clan ?? '')
+        setClan(profile.clan ?? '')
       }
       setTakenColors(new Set((allColors ?? []).map(r => r.chart_color as string)))
       setLoading(false)
@@ -106,7 +106,7 @@ export default function SettingsPage() {
     if (!user) return
     const { error: err } = await supabase
       .from('profiles')
-      .update({ clan: value || null } as any)
+      .update({ clan: (value || null) as 'Beeläiset' | 'Ceeläiset' | 'Independents' | null })
       .eq('id', user.id)
     setClanSaving(false)
     if (err) setClanError('Tallennus epäonnistui.')

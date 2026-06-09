@@ -8,7 +8,13 @@ interface Message {
   user_id: string
   message: string
   created_at: string
-  profiles: { display_name: string } | null
+  profiles: { display_name: string } | { display_name: string }[] | null
+}
+
+function getDisplayName(profiles: Message['profiles']): string {
+  if (!profiles) return '?'
+  if (Array.isArray(profiles)) return profiles[0]?.display_name ?? '?'
+  return profiles.display_name
 }
 
 interface Props {
@@ -31,7 +37,7 @@ export default function ChatBox({ myId }: Props) {
         .select('id, user_id, message, created_at, profiles(display_name)')
         .order('created_at', { ascending: true })
         .limit(200)
-      if (data) setMessages(data as unknown as Message[])
+      if (data) setMessages(data as Message[])
     }
     load()
   }, [])
@@ -50,7 +56,7 @@ export default function ChatBox({ myId }: Props) {
             .select('id, user_id, message, created_at, profiles(display_name)')
             .eq('id', (payload.new as { id: number }).id)
             .single()
-          if (data) setMessages(prev => [...prev, data as unknown as Message])
+          if (data) setMessages(prev => [...prev, data as Message])
         },
       )
       .on(
@@ -109,7 +115,7 @@ export default function ChatBox({ myId }: Props) {
         )}
         {messages.map(m => {
           const isMe = m.user_id === myId
-          const name = m.profiles?.display_name ?? '?'
+          const name = getDisplayName(m.profiles)
           return (
             <div key={m.id} className={`flex gap-2 group ${isMe ? 'flex-row-reverse' : ''}`}>
               <div className={`max-w-[75%] ${isMe ? 'items-end' : 'items-start'} flex flex-col gap-0.5`}>
