@@ -88,6 +88,7 @@ export default function BetsPage() {
   const [groupPicks, setGroupPicks] = useState<Record<string, string[]>>({})
   const [saving, setSaving] = useState<Record<string, boolean>>({})
   const [saved, setSaved] = useState<Record<string, boolean>>({})
+  const [confirmedBets, setConfirmedBets] = useState<Record<string, string>>({})
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [scorerSearch, setScorerSearch] = useState('')
 
@@ -103,6 +104,7 @@ export default function BetsPage() {
       setData(d)
       setChampionPick(d.bets['WORLD_CHAMPION'] ?? '')
       setScorerPick(d.bets['TOP_SCORER'] ?? '')
+      setConfirmedBets(d.bets)
 
       const picks: Record<string, string[]> = {}
       for (const group of Object.keys(d.groups)) {
@@ -129,6 +131,7 @@ export default function BetsPage() {
     setSaving(s => ({ ...s, WORLD_CHAMPION: false }))
     if (res.ok) {
       setSaved(s => ({ ...s, WORLD_CHAMPION: true }))
+      setConfirmedBets(c => ({ ...c, WORLD_CHAMPION: championPick }))
     } else {
       setErrors(e => ({ ...e, WORLD_CHAMPION: d.error ?? 'Virhe' }))
     }
@@ -146,8 +149,10 @@ export default function BetsPage() {
     })
     const d = await res.json()
     setSaving(s => ({ ...s, TOP_SCORER: false }))
-    if (res.ok) setSaved(s => ({ ...s, TOP_SCORER: true }))
-    else setErrors(e => ({ ...e, TOP_SCORER: d.error ?? 'Virhe' }))
+    if (res.ok) {
+      setSaved(s => ({ ...s, TOP_SCORER: true }))
+      setConfirmedBets(c => ({ ...c, TOP_SCORER: scorerPick }))
+    } else setErrors(e => ({ ...e, TOP_SCORER: d.error ?? 'Virhe' }))
   }
 
   async function saveGroup(group: string) {
@@ -165,6 +170,7 @@ export default function BetsPage() {
     setSaving(s => ({ ...s, [group]: false }))
     if (res.ok) {
       setSaved(s => ({ ...s, [group]: true }))
+      setConfirmedBets(c => ({ ...c, [group]: JSON.stringify(picks) }))
     } else {
       setErrors(e => ({ ...e, [group]: d.error ?? 'Virhe' }))
     }
@@ -256,17 +262,33 @@ export default function BetsPage() {
             {errors['WORLD_CHAMPION'] && (
               <p className="text-xs text-red-600">{errors['WORLD_CHAMPION']}</p>
             )}
-            <button
-              onClick={saveChampion}
-              disabled={!championPick || saving['WORLD_CHAMPION']}
-              className={`w-full py-2 rounded-lg text-sm font-medium transition-colors ${
-                saved['WORLD_CHAMPION']
-                  ? 'bg-green-100 text-green-700 border border-green-300'
-                  : 'bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50'
-              }`}
-            >
-              {saving['WORLD_CHAMPION'] ? 'Tallennetaan…' : saved['WORLD_CHAMPION'] ? '✓ Tallennettu' : 'Tallenna'}
-            </button>
+            {(() => {
+              const confirmed = confirmedBets['WORLD_CHAMPION']
+              const isDirty = confirmed && championPick !== confirmed
+              return (
+                <>
+                  <button
+                    onClick={saveChampion}
+                    disabled={!championPick || saving['WORLD_CHAMPION']}
+                    className={`w-full py-2 rounded-lg text-sm font-medium transition-colors ${
+                      saved['WORLD_CHAMPION'] && !isDirty
+                        ? 'bg-green-100 text-green-700 border border-green-300'
+                        : 'bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50'
+                    }`}
+                  >
+                    {saving['WORLD_CHAMPION'] ? 'Tallennetaan…' : saved['WORLD_CHAMPION'] && !isDirty ? '✓ Tallennettu' : 'Tallenna'}
+                  </button>
+                  {confirmed && (
+                    <p className="text-xs text-gray-400">
+                      {isDirty
+                        ? <>Tallennettu: <strong className="text-gray-600">{getCountry(confirmed).name}</strong> — muista tallentaa muutos</>
+                        : <>✓ Tallennettu: <strong className="text-gray-600">{getCountry(confirmed).name}</strong></>
+                      }
+                    </p>
+                  )}
+                </>
+              )
+            })()}
           </div>
         )}
       </div>
@@ -400,17 +422,38 @@ export default function BetsPage() {
 
                 {errors['TOP_SCORER'] && <p className="text-xs text-red-600">{errors['TOP_SCORER']}</p>}
 
-                <button
-                  onClick={saveScorer}
-                  disabled={!scorerPick || saving['TOP_SCORER']}
-                  className={`w-full py-2 rounded-lg text-sm font-medium transition-colors ${
-                    saved['TOP_SCORER']
-                      ? 'bg-green-100 text-green-700 border border-green-300'
-                      : 'bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50'
-                  }`}
-                >
-                  {saving['TOP_SCORER'] ? 'Tallennetaan…' : saved['TOP_SCORER'] ? '✓ Tallennettu' : scorerPick ? 'Tallenna' : 'Valitse pelaaja'}
-                </button>
+                {(() => {
+                  const confirmed = confirmedBets['TOP_SCORER']
+                  const isDirty = confirmed && scorerPick !== confirmed
+                  const confirmedLabel = confirmed
+                    ? isWildcard(confirmed)
+                      ? `Muu ${getCountry(wildcardCountry(confirmed)).name} pelaaja`
+                      : confirmed
+                    : null
+                  return (
+                    <>
+                      <button
+                        onClick={saveScorer}
+                        disabled={!scorerPick || saving['TOP_SCORER']}
+                        className={`w-full py-2 rounded-lg text-sm font-medium transition-colors ${
+                          saved['TOP_SCORER'] && !isDirty
+                            ? 'bg-green-100 text-green-700 border border-green-300'
+                            : 'bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50'
+                        }`}
+                      >
+                        {saving['TOP_SCORER'] ? 'Tallennetaan…' : saved['TOP_SCORER'] && !isDirty ? '✓ Tallennettu' : scorerPick ? 'Tallenna' : 'Valitse pelaaja'}
+                      </button>
+                      {confirmedLabel && (
+                        <p className="text-xs text-gray-400">
+                          {isDirty
+                            ? <>Tallennettu: <strong className="text-gray-600">{confirmedLabel}</strong> — muista tallentaa muutos</>
+                            : <>✓ Tallennettu: <strong className="text-gray-600">{confirmedLabel}</strong></>
+                          }
+                        </p>
+                      )}
+                    </>
+                  )
+                })()}
               </div>
             )}
           </div>
@@ -477,25 +520,43 @@ export default function BetsPage() {
               {!isLocked && (
                 <>
                   {errors[group] && <p className="text-xs text-red-600">{errors[group]}</p>}
-                  <button
-                    onClick={() => saveGroup(group)}
-                    disabled={picks.length !== 2 || saving[group]}
-                    className={`w-full py-1.5 rounded text-xs font-medium transition-colors ${
-                      saved[group]
-                        ? 'bg-green-100 text-green-700 border border-green-300'
-                        : picks.length === 2
-                          ? 'bg-blue-600 text-white hover:bg-blue-700'
-                          : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                    }`}
-                  >
-                    {saving[group]
-                      ? 'Tallennetaan…'
-                      : saved[group]
-                        ? '✓ Tallennettu'
-                        : picks.length === 2
-                          ? 'Tallenna'
-                          : `Valitse ${remaining} joukkue${remaining === 1 ? '' : 'tta'}`}
-                  </button>
+                  {(() => {
+                    const confirmedRaw = confirmedBets[group]
+                    const confirmedTeams: string[] = confirmedRaw ? JSON.parse(confirmedRaw) : []
+                    const isDirty = confirmedTeams.length === 2 &&
+                      JSON.stringify([...picks].sort()) !== JSON.stringify([...confirmedTeams].sort())
+                    return (
+                      <>
+                        <button
+                          onClick={() => saveGroup(group)}
+                          disabled={picks.length !== 2 || saving[group]}
+                          className={`w-full py-1.5 rounded text-xs font-medium transition-colors ${
+                            saved[group] && !isDirty
+                              ? 'bg-green-100 text-green-700 border border-green-300'
+                              : picks.length === 2
+                                ? 'bg-blue-600 text-white hover:bg-blue-700'
+                                : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                          }`}
+                        >
+                          {saving[group]
+                            ? 'Tallennetaan…'
+                            : saved[group] && !isDirty
+                              ? '✓ Tallennettu'
+                              : picks.length === 2
+                                ? 'Tallenna'
+                                : `Valitse ${remaining} joukkue${remaining === 1 ? '' : 'tta'}`}
+                        </button>
+                        {confirmedTeams.length === 2 && (
+                          <p className="text-xs text-gray-400">
+                            {isDirty
+                              ? <>Tallennettu: <strong className="text-gray-600">{confirmedTeams.map(t => getCountry(t).name).join(' & ')}</strong> — muista tallentaa</>
+                              : <>✓ Tallennettu: <strong className="text-gray-600">{confirmedTeams.map(t => getCountry(t).name).join(' & ')}</strong></>
+                            }
+                          </p>
+                        )}
+                      </>
+                    )
+                  })()}
                 </>
               )}
             </div>

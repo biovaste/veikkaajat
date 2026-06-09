@@ -1,7 +1,8 @@
 import { createServerClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { formatDate } from '@/lib/utils'
-import { getCountry, flagUrl } from '@/lib/countries'
+import { getCountry, flagUrl, groupLabel } from '@/lib/countries'
+import { isWildcard, wildcardCountry } from '@/lib/players'
 
 export const revalidate = 0
 
@@ -10,11 +11,35 @@ export default async function MyPredictionsPage() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: predictions } = await supabase
-    .from('predictions')
-    .select('*, matches(home_team, away_team, kickoff_at, home_score, away_score, status)')
-    .eq('user_id', user.id)
-    .order('matches(kickoff_at)', { ascending: true })
+  const [
+    { data: predictions },
+    { data: categoryBets },
+    { data: categoryResults },
+    { data: firstMatch },
+  ] = await Promise.all([
+    supabase
+      .from('predictions')
+      .select('*, matches(home_team, away_team, kickoff_at, home_score, away_score, status)')
+      .eq('user_id', user.id)
+      .order('matches(kickoff_at)', { ascending: true }),
+    supabase
+      .from('category_bets')
+      .select('category, bet_value, points')
+      .eq('user_id', user.id),
+    supabase
+      .from('category_results')
+      .select('category, result_value'),
+    supabase
+      .from('matches')
+      .select('kickoff_at')
+      .order('kickoff_at', { ascending: true })
+      .limit(1)
+      .maybeSingle(),
+  ])
+
+  const betsOpen = !firstMatch?.kickoff_at || new Date() < new Date(firstMatch.kickoff_at)
+  const betMap = Object.fromEntries((categoryBets ?? []).map(b => [b.category, b]))
+  const resultMap = Object.fromEntries((categoryResults ?? []).map(r => [r.category, r.result_value]))
 
   const now = new Date()
 
@@ -92,6 +117,129 @@ export default async function MyPredictionsPage() {
           <span className="text-sm text-gray-500">{totalScored} / {played.length * 5} p</span>
         )}
       </div>
+
+      {/* ── Special bets ── */}
+      {categoryBets && categoryBets.length > 0 && (
+        <section className="space-y-2">
+          <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+            Erikoisveikkaukset
+          </h2>
+          <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-100">
+
+            {/* World champion */}
+            {(() => {
+              const bet = betMap['WORLD_CHAMPION']
+              if (!bet) return null
+              const picked = betsOpen ? null : bet.bet_value
+              const correct = resultMap['WORLD_CHAMPION']
+              const pts = bet.points
+              return (
+                <div className="flex items-center justify-between gap-2 px-4 py-3">
+                  <div>
+                    <div className="text-xs text-gray-400 mb-0.5">🏆 Maailmanmestari</div>
+                    {picked ? (
+                      <div className="flex items-center gap-1.5 text-sm font-medium">
+                        {(() => { const { name, code } = getCountry(picked); return (<>{code && <img src={flagUrl(code)} alt={name} width={18} height={14} className="rounded-sm" />}{name}</>) })()}
+                        {correct && picked !== correct && (
+                          <span className="text-xs text-gray-400 ml-1">
+                            (oikea: {getCountry(correct).name})
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="text-sm text-gray-300 italic">{betsOpen ? 'Veikkaukset auki' : 'Ei veikkausta'}</div>
+                    )}
+                  </div>
+                  <div className="text-right shrink-0">
+                    {pts !== null ? (
+                      <span className={`text-sm font-bold ${pts > 0 ? 'text-green-600' : 'text-gray-400'}`}>{pts} / 10 p</span>
+                    ) : picked ? (
+                      <span className="text-xs text-gray-300">10 p</span>
+                    ) : null}
+                  </div>
+                </div>
+              )
+            })()}
+
+            {/* Top scorer */}
+            {(() => {
+              const bet = betMap['TOP_SCORER']
+              if (!bet) return null
+              const picked = betsOpen ? null : bet.bet_value
+              const correct = resultMap['TOP_SCORER']
+              const pts = bet.points
+              const pickedLabel = picked
+                ? isWildcard(picked) ? `Muu ${getCountry(wildcardCountry(picked)).name} pelaaja` : picked
+                : null
+              const correctLabel = correct
+                ? isWildcard(correct) ? `Muu ${getCountry(wildcardCountry(correct)).name} pelaaja` : correct
+                : null
+              return (
+                <div className="flex items-center justify-between gap-2 px-4 py-3">
+                  <div>
+                    <div className="text-xs text-gray-400 mb-0.5">⚽ Paras maalintekijä</div>
+                    {pickedLabel ? (
+                      <div className="text-sm font-medium">
+                        {pickedLabel}
+                        {correctLabel && picked !== correct && (
+                          <span className="text-xs text-gray-400 ml-1">(oikea: {correctLabel})</span>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="text-sm text-gray-300 italic">{betsOpen ? 'Veikkaukset auki' : 'Ei veikkausta'}</div>
+                    )}
+                  </div>
+                  <div className="text-right shrink-0">
+                    {pts !== null ? (
+                      <span className={`text-sm font-bold ${pts > 0 ? 'text-green-600' : 'text-gray-400'}`}>{pts} / 5 p</span>
+                    ) : pickedLabel ? (
+                      <span className="text-xs text-gray-300">5 p</span>
+                    ) : null}
+                  </div>
+                </div>
+              )
+            })()}
+
+            {/* Group advance bets */}
+            {(categoryBets ?? [])
+              .filter(b => b.category.startsWith('GROUP_'))
+              .sort((a, b) => a.category.localeCompare(b.category))
+              .map(bet => {
+                const teams: string[] = JSON.parse(bet.bet_value)
+                const correct: string[] = resultMap[bet.category] ? JSON.parse(resultMap[bet.category]) : []
+                const pts = bet.points
+                return (
+                  <div key={bet.category} className="flex items-center justify-between gap-2 px-4 py-3">
+                    <div>
+                      <div className="text-xs text-gray-400 mb-0.5">{groupLabel(bet.category)}</div>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {teams.map(team => {
+                          const { name, code } = getCountry(team)
+                          const isCorrect = correct.includes(team)
+                          const isWrong = correct.length > 0 && !correct.includes(team)
+                          return (
+                            <span key={team} className={`flex items-center gap-1 text-sm font-medium ${isCorrect ? 'text-green-600' : isWrong ? 'text-red-400 line-through' : ''}`}>
+                              {code && <img src={flagUrl(code)} alt={name} width={16} height={12} className="rounded-sm" />}
+                              {name}
+                            </span>
+                          )
+                        })}
+                        {teams.length > 0 && <span className="text-gray-200 text-sm">&amp;</span>}
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      {pts !== null ? (
+                        <span className={`text-sm font-bold ${pts > 0 ? 'text-green-600' : 'text-gray-400'}`}>{pts} / 4 p</span>
+                      ) : (
+                        <span className="text-xs text-gray-300">4 p</span>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+          </div>
+        </section>
+      )}
 
       {upcoming.length > 0 && (
         <section className="space-y-2">
