@@ -105,16 +105,17 @@ app/
   leaderboard/page.tsx    # Leaderboard + cumulative chart + transposed stats table
                           # force-dynamic; predictions via service role for full stats
   matches/page.tsx        # Fixture list + prediction entry
-  my-predictions/page.tsx # Player's own predictions + points
+  my-predictions/page.tsx # Player's own predictions + points + special bets summary
   bets/page.tsx           # Special bets: champion, top scorer (country-grouped + search),
                           # group advance (wildcard for all tournament countries)
+                          # confirmedBets state: persistent save indicator, unsaved-change warning
   settings/page.tsx       # Player self-service: display name, Telegram ID, chart color, clan
   admin/
     layout.tsx            # Guards: redirect non-admins to /leaderboard
     page.tsx              # Admin dashboard links
     seed/page.tsx         # Import matches from football-data.org
     matches/page.tsx      # Manual result override (also auto-fetches xG)
-    players/page.tsx      # Invite players, set telegram_chat_id
+    players/page.tsx      # Invite players, set telegram_chat_id, copy login link to clipboard
     categories/page.tsx   # Score special bets (champion, scorer, group advance)
 
 components/
@@ -123,6 +124,8 @@ components/
   PredictionForm.tsx      # Score input (home : away), optimistic save
   CountdownTimer.tsx      # Client component, updates every 30s
   PointsChart.tsx         # Recharts line chart; accepts colors[] prop (one per player)
+  ChatBox.tsx             # Client component: live chat on leaderboard page
+                          # Supabase Realtime subscription; iMessage-style bubbles; own messages deletable
 
 lib/
   supabase/
@@ -150,7 +153,8 @@ app/api/
   admin/seed-matches/route.ts     # POST: import from football-data.org
   admin/override-result/route.ts  # POST: set result + score + fetch xG + notify Telegram
   admin/score-categories/route.ts # POST: set category result + score all bets
-  admin/invite-player/route.ts    # POST: send magic link invite
+  admin/invite-player/route.ts        # POST: send magic link invite
+  admin/generate-login-link/route.ts  # POST: generate magic link and return URL (admin only, no email sent)
   telegram/
     webhook/route.ts              # Telegram bot webhook — /start, /chart, /stats, /luokkasota, /help
 
@@ -170,6 +174,7 @@ supabase/
     0009_xg_columns.sql           # af_fixture_id, home_xg, away_xg on matches
     0010_chart_color.sql          # chart_color on profiles + partial unique index
     0011_clan.sql                 # clan on profiles (CHECK constraint, 3 allowed values)
+    0012_chat.sql                 # chat_messages table + RLS (read all, insert/delete own)
   functions/
     poll-match-results/index.ts      # Deno: polls football-data.org, scores, fetches xG, sends result message
     check-upcoming-matches/index.ts  # Deno: sends reminder DMs + kickoff group message
@@ -303,6 +308,8 @@ npm test           # vitest unit tests
 - `/admin/categories` page for admin scoring
 - Deadline enforced server-side (first match kickoff for champion/scorer, group's first match for group bets)
 - Category bonus included in leaderboard totals and `/stats`
+- `confirmedBets` state tracks server-persisted value separately from current selection: persistent "✓ Tallennettu: X" line always visible, warns if selection changed without saving
+- Special bets summary shown on `/my-predictions`: champion, scorer, group picks with flags, points and correct answers revealed after deadline; picks hidden while betting is open
 
 ### ✅ Phase 5 — Automated Polling
 - `poll-match-results` edge function: runs every 30 min, polls football-data.org, scores predictions, fetches xG, sends Telegram result message
@@ -315,6 +322,11 @@ npm test           # vitest unit tests
 - Players pick their clan in `/settings` (radio buttons, saveable independently)
 - `/luokkasota` Telegram command: clan totals + averages (ranked by avg), members listed per clan
 - `sendClanWar()` in `lib/telegram/notify.ts`
+
+### ✅ Phase 5d — Admin & Chat
+- Login link generator: `POST /api/admin/generate-login-link` uses `auth.admin.generateLink()` (service role); button in `/admin/players` copies link to clipboard — no email needed
+- Live chat on `/leaderboard`: `ChatBox` client component, `chat_messages` table (migration 0012), Supabase Realtime for instant updates, iMessage-style UI, own messages deletable on hover
+- Enable Realtime for chat_messages: `ALTER PUBLICATION supabase_realtime ADD TABLE public.chat_messages;`
 
 ### ✅ Phase 5b — Leaderboard & Stats
 - Leaderboard: `force-dynamic`, auth guard, all-player predictions via service role

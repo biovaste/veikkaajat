@@ -213,18 +213,20 @@ export default async function MyPredictionsPage() {
                     <div>
                       <div className="text-xs text-gray-400 mb-0.5">{groupLabel(bet.category)}</div>
                       <div className="flex items-center gap-1.5 flex-wrap">
-                        {teams.map(team => {
+                        {teams.map((team, i) => {
                           const { name, code } = getCountry(team)
                           const isCorrect = correct.includes(team)
                           const isWrong = correct.length > 0 && !correct.includes(team)
                           return (
-                            <span key={team} className={`flex items-center gap-1 text-sm font-medium ${isCorrect ? 'text-green-600' : isWrong ? 'text-red-400 line-through' : ''}`}>
-                              {code && <img src={flagUrl(code)} alt={name} width={16} height={12} className="rounded-sm" />}
-                              {name}
-                            </span>
+                            <>
+                              {i > 0 && <span key={`sep-${i}`} className="text-gray-300 text-sm">&amp;</span>}
+                              <span key={team} className={`flex items-center gap-1 text-sm font-medium ${isCorrect ? 'text-green-600' : isWrong ? 'text-red-400 line-through' : ''}`}>
+                                {code && <img src={flagUrl(code)} alt={name} width={16} height={12} className="rounded-sm" />}
+                                {name}
+                              </span>
+                            </>
                           )
                         })}
-                        {teams.length > 0 && <span className="text-gray-200 text-sm">&amp;</span>}
                       </div>
                     </div>
                     <div className="text-right shrink-0">
