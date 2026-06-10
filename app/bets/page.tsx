@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { getCountry, flagUrl, groupLabel } from '@/lib/countries'
+import { formatDate } from '@/lib/utils'
 import { TOP_SCORER_PLAYERS, wildcardValue, isWildcard, wildcardCountry } from '@/lib/players'
 import { useRouter } from 'next/navigation'
 
@@ -218,6 +219,11 @@ export default function BetsPage() {
           <div>
             <h2 className="font-semibold">🏆 Maailmanmestari</h2>
             <p className="text-xs text-gray-400 mt-0.5">10 pistettä oikeasta vastauksesta</p>
+            {data.championDeadline && (
+              <p className={`text-xs mt-0.5 ${championLocked ? 'text-red-400' : 'text-orange-500'}`}>
+                {championLocked ? '🔒 Sulkeutui ' : '⏱ Sulkeutuu '}{formatDate(data.championDeadline)}
+              </p>
+            )}
           </div>
           {championPoints !== null && (
             <span className={`text-sm font-bold shrink-0 ${championPoints > 0 ? 'text-green-600' : 'text-gray-400'}`}>
@@ -305,6 +311,11 @@ export default function BetsPage() {
               <div>
                 <h2 className="font-semibold">⚽ Paras maalintekijä</h2>
                 <p className="text-xs text-gray-400 mt-0.5">5 pistettä oikeasta vastauksesta</p>
+                {data.championDeadline && (
+                  <p className={`text-xs mt-0.5 ${scorerLocked ? 'text-red-400' : 'text-orange-500'}`}>
+                    {scorerLocked ? '🔒 Sulkeutui ' : '⏱ Sulkeutuu '}{formatDate(data.championDeadline)}
+                  </p>
+                )}
               </div>
               {scorerPoints !== null && (
                 <span className={`text-sm font-bold shrink-0 ${scorerPoints > 0 ? 'text-green-600' : 'text-gray-400'}`}>
@@ -464,7 +475,7 @@ export default function BetsPage() {
       <div className="space-y-3">
         <div>
           <h2 className="font-semibold">Ryhmien jatkajat</h2>
-          <p className="text-xs text-gray-400 mt-0.5">Valitse 2 jatkoon menevää joukkuetta. 4 pistettä, jos molemmat oikein.</p>
+          <p className="text-xs text-gray-400 mt-0.5">Valitse ryhmän kaksi jatkoon menevää joukkuetta (vain ryhmävoittaja ja kakkonen, ei kolmossijat). 4 pistettä, jos molemmat oikein.</p>
         </div>
 
         {sortedGroups.map(([group, info]) => {
@@ -479,7 +490,12 @@ export default function BetsPage() {
           return (
             <div key={group} className="bg-white rounded-lg border border-gray-200 p-3 space-y-2">
               <div className="flex items-center justify-between">
-                <h3 className="font-medium text-sm">{groupFi}</h3>
+                <div>
+                  <h3 className="font-medium text-sm">{groupFi}</h3>
+                  <p className={`text-xs mt-0.5 ${isLocked ? 'text-red-400' : 'text-orange-500'}`}>
+                    {isLocked ? '🔒 Sulkeutui ' : '⏱ Sulkeutuu '}{formatDate(info.deadline)}
+                  </p>
+                </div>
                 <div className="flex items-center gap-2">
                   {isLocked && picks.length === 0 && (
                     <span className="text-xs text-gray-300">Ei veikkausta</span>

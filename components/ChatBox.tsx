@@ -71,9 +71,10 @@ export default function ChatBox({ myId }: Props) {
     return () => { supabase.removeChannel(channel) }
   }, [])
 
-  // Scroll to bottom when new messages arrive
+  // Scroll to bottom within the chat container (not the whole page)
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    const list = listRef.current
+    if (list) list.scrollTop = list.scrollHeight
   }, [messages])
 
   async function send() {
