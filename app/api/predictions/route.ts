@@ -41,8 +41,9 @@ export async function POST(request: NextRequest) {
       .single()
 
     if (!match) return NextResponse.json({ error: 'Ottelua ei löydy' }, { status: 404 })
-    if (new Date(match.kickoff_at) <= new Date()) {
-      return NextResponse.json({ error: 'Ottelu on jo alkanut' }, { status: 409 })
+    const deadline = new Date(new Date(match.kickoff_at).getTime() - 5 * 60 * 1000)
+    if (deadline <= new Date()) {
+      return NextResponse.json({ error: 'Veikkausaika on umpeutunut' }, { status: 409 })
     }
     if (match.status === 'CANCELLED' || match.status === 'POSTPONED') {
       return NextResponse.json({ error: 'Ottelu on peruttu tai lykätty' }, { status: 409 })

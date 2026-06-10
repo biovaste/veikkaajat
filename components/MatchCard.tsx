@@ -46,7 +46,9 @@ function TeamName({ englishName }: { englishName: string }) {
 }
 
 export default function MatchCard({ match, prediction }: Props) {
+  const deadline = new Date(new Date(match.kickoff_at).getTime() - 5 * 60 * 1000)
   const kickoffPassed = new Date(match.kickoff_at) <= new Date()
+  const predictionsClosed = deadline <= new Date()
   const hasResult = match.home_score !== null && match.away_score !== null
   const isPostponed = match.status === 'POSTPONED'
   const isCancelled = match.status === 'CANCELLED'
@@ -77,10 +79,10 @@ export default function MatchCard({ match, prediction }: Props) {
             <span className="text-xs bg-yellow-100 text-yellow-700 rounded px-1.5 py-0.5">Lykätty</span>
           ) : kickoffPassed ? (
             <span className="text-xs text-gray-400">Käynnissä</span>
+          ) : predictionsClosed ? (
+            <span className="text-xs text-gray-400">Suljettu</span>
           ) : (
-            <span className="text-xs text-gray-400">
-              <CountdownTimer kickoffAt={match.kickoff_at} />
-            </span>
+            <CountdownTimer deadlineAt={deadline.toISOString()} />
           )}
         </div>
       </div>
@@ -105,7 +107,7 @@ export default function MatchCard({ match, prediction }: Props) {
             ) : (
               <p className="text-xs text-gray-300">Et veikannut tätä ottelua</p>
             )
-          ) : kickoffPassed || isPostponed ? (
+          ) : predictionsClosed || isPostponed ? (
             prediction ? (
               <div className="flex items-center gap-2 text-sm">
                 <span className="text-xs text-gray-400">Veikkauksesi:</span>

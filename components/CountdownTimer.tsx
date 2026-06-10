@@ -2,14 +2,14 @@
 
 import { useEffect, useState } from 'react'
 
-export default function CountdownTimer({ kickoffAt }: { kickoffAt: string }) {
+export default function CountdownTimer({ deadlineAt }: { deadlineAt: string }) {
   const [label, setLabel] = useState('')
 
   useEffect(() => {
     function update() {
-      const diff = new Date(kickoffAt).getTime() - Date.now()
+      const diff = new Date(deadlineAt).getTime() - Date.now()
       if (diff <= 0) {
-        setLabel('Alkanut')
+        setLabel('Suljettu')
         return
       }
       const h = Math.floor(diff / 3_600_000)
@@ -26,7 +26,12 @@ export default function CountdownTimer({ kickoffAt }: { kickoffAt: string }) {
     update()
     const id = setInterval(update, 30_000)
     return () => clearInterval(id)
-  }, [kickoffAt])
+  }, [deadlineAt])
 
-  return <span>{label}</span>
+  return (
+    <span className="text-right">
+      <span className="block text-xs text-gray-400">Aikaa kohteen sulkeutumiseen:</span>
+      <span className="text-xs font-medium text-gray-600">{label}</span>
+    </span>
+  )
 }
