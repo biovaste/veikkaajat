@@ -59,7 +59,7 @@ Special bet scoring: `app/api/admin/score-categories/route.ts`.
 ## Key Architectural Decisions
 
 - **Admin writes**: seed and override API routes use `createServerClient()` (anon key + cookie session). RLS allows writes because `profiles.is_admin = true` for the authenticated user (see migration 0004). `createServiceRoleClient()` is reserved for `auth.admin.*` operations (e.g. inviting users) and for reading all players' predictions in the leaderboard (bypasses `predictions_select_own` RLS). Note: the new Supabase "Secret API key" is NOT the legacy `service_role` JWT and does not bypass RLS — don't confuse them.
-- **Kickoff lock**: enforced both client-side (hide form) and server-side (`POST /api/predictions` rejects if `kickoff_at <= now()`).
+- **Prediction deadline**: 5 minutes before kickoff. Enforced client-side (form hidden, countdown shows "Aikaa kohteen sulkeutumiseen:") and server-side (`POST /api/predictions` rejects if `kickoff_at − 5 min <= now()`). Kickoff time displayed to players is unchanged.
 - **No open signup**: admin uses `/admin/players` to invite users via `supabase.auth.admin.inviteUserByEmail()`.
 - **football-data.org rate limit**: 10 req/min. Group stage seed is one bulk call. The edge function polls one match at a time with a 7s sleep between calls.
 - **football-data.org group format**: groups stored as `GROUP_A` (underscore, uppercase). `groupLabel()` in `lib/countries.ts` handles both `GROUP_A` and `Group A` formats → `Ryhmä A`.
@@ -77,7 +77,7 @@ All tables are in `supabase/migrations/`. Migrations 0001–0011 must be applied
 |---|---|
 | `profiles` | One row per auth user; auto-created via trigger on `auth.users` insert |
 | `matches` | Seeded from football-data.org; result + xG fields set after match finishes |
-| `predictions` | One row per (player, match); editable until `kickoff_at` |
+| `predictions` | One row per (player, match); editable until 5 min before `kickoff_at` |
 | `scoring_log` | Audit trail written after each match is scored |
 | `category_bets` | Special bets: WORLD_CHAMPION, TOP_SCORER, group advance (one row per user+category) |
 | `category_results` | Correct answers for each category, set by admin |
@@ -106,6 +106,7 @@ app/
                           # force-dynamic; predictions via service role for full stats
   matches/page.tsx        # Fixture list + prediction entry
   my-predictions/page.tsx # Player's own predictions + points + special bets summary
+                          # Special bets always visible; "muokattavissa" tag while open; correct answers revealed after deadline
   bets/page.tsx           # Special bets: champion, top scorer (country-grouped + search),
                           # group advance (wildcard for all tournament countries)
                           # confirmedBets state: persistent save indicator, unsaved-change warning
@@ -289,8 +290,9 @@ npm test           # vitest unit tests
 - `/admin`, `/admin/seed`, `/admin/players`, `/matches`, `/leaderboard`, `/my-predictions`
 
 ### ✅ Phase 2 — Predictions
-- `POST /api/predictions` with server-side kickoff guard
+- `POST /api/predictions` with server-side deadline guard (5 min before kickoff)
 - `MatchCard`, `PredictionForm`, `CountdownTimer` components
+- `CountdownTimer` counts down to the prediction deadline (not kickoff); shows "Aikaa kohteen sulkeutumiseen:" label
 - `/matches` page with inline prediction forms
 
 ### ✅ Phase 3 — Scoring + Leaderboard
@@ -311,7 +313,7 @@ npm test           # vitest unit tests
 - Deadline enforced server-side (first match kickoff for champion/scorer, group's first match for group bets)
 - Category bonus included in leaderboard totals and `/stats`
 - `confirmedBets` state tracks server-persisted value separately from current selection: persistent "✓ Tallennettu: X" line always visible, warns if selection changed without saving
-- Special bets summary shown on `/my-predictions`: champion, scorer, group picks with flags, points and correct answers revealed after deadline; picks hidden while betting is open
+- Special bets summary shown on `/my-predictions`: champion, scorer, group picks with flags, always visible; shows "muokattavissa" tag while betting is still open; correct answers and points revealed after deadline
 
 ### ✅ Phase 5 — Automated Polling
 - `poll-match-results` edge function: runs every 30 min, polls football-data.org, scores predictions, fetches xG, sends Telegram result message

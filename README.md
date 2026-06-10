@@ -5,7 +5,7 @@ A full-stack score prediction app for the 2026 FIFA World Cup, built for a priva
 ## Features
 
 - **Magic link authentication** — admin-controlled invites, no open signup
-- **Match predictions** — score input per match, locked at kickoff; 3 pts for correct result + 1 pt per correct goal tally
+- **Match predictions** — score input per match, locked 5 minutes before kickoff; 3 pts for correct result + 1 pt per correct goal tally
 - **Special bets** — tournament winner (10 pts), top scorer (5 pts, 80+ players across 40 countries), group stage advancement (4 pts per group)
 - **Live leaderboard** — 12 computed stats per player including prediction accuracy, days in the lead, and xG-adjusted points; transposed table with cumulative points chart
 - **Automated result polling** — Supabase Edge Function polls football-data.org every 30 min, scores predictions, and posts a result summary to Telegram
@@ -32,7 +32,7 @@ A full-stack score prediction app for the 2026 FIFA World Cup, built for a priva
 - **RLS throughout** — all tables protected by row-level security policies; service role client used selectively only where cross-player data access is required (leaderboard stats, Telegram notifications)
 - **`force-dynamic` on auth-gated pages** — prevents ISR cache from bypassing RLS
 - **Scoring engine as a pure function** — `lib/scoring/engine.ts` is unit-tested with Vitest and reused across the web app and edge functions
-- **Kickoff lock at two layers** — client hides the form; server rejects `POST /api/predictions` if `kickoff_at <= now()`
+- **Prediction deadline 5 min before kickoff** — client hides the form and shows a countdown ("Aikaa kohteen sulkeutumiseen:"); server rejects `POST /api/predictions` if `kickoff_at − 5 min <= now()`
 - **Chart color uniqueness enforced at the DB level** — partial unique index on `profiles.chart_color WHERE chart_color IS NOT NULL`
 
 ## Project structure

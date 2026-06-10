@@ -7,18 +7,29 @@ export default function CountdownTimer({ deadlineAt }: { deadlineAt: string }) {
 
   useEffect(() => {
     function update() {
-      const diff = new Date(deadlineAt).getTime() - Date.now()
+      const deadline = new Date(deadlineAt)
+      const diff = deadline.getTime() - Date.now()
       if (diff <= 0) {
         setLabel('Suljettu')
         return
       }
       const h = Math.floor(diff / 3_600_000)
       const m = Math.floor((diff % 3_600_000) / 60_000)
+
+      // Format closing time as HH:MM with optional +N day suffix
+      const timeStr = deadline.toLocaleTimeString('fi-FI', { hour: '2-digit', minute: '2-digit' })
+      const today = new Date()
+      const dayDiff =
+        Math.floor(deadline.getTime() / 86_400_000) -
+        Math.floor(today.getTime() / 86_400_000)
+      const daySuffix = dayDiff > 0 ? ` +${dayDiff}` : ''
+      const closingTime = `${timeStr}${daySuffix}`
+
       if (h >= 48) {
         const d = Math.floor(h / 24)
-        setLabel(`${d} pv`)
+        setLabel(`${d} pv (${closingTime})`)
       } else if (h >= 1) {
-        setLabel(`${h}t ${m}min`)
+        setLabel(`${h}t ${m}min (${closingTime})`)
       } else {
         setLabel(`${m}min`)
       }
