@@ -448,6 +448,30 @@ export async function sendClanWar(chatId?: number | string): Promise<void> {
   await sendMessage(target, text.trim())
 }
 
+export async function sendTopScorers(chatId?: number | string): Promise<void> {
+  const target = String(chatId ?? GROUP_CHAT_ID)
+  const { fetchTopScorers } = await import('../football-data/client')
+  const { getCountry } = await import('../countries')
+
+  const scorers = await fetchTopScorers(10)
+
+  if (scorers.length === 0) {
+    await sendMessage(target, 'ℹ️ Maalipörssi ei ole vielä käytettävissä.')
+    return
+  }
+
+  const medals = ['🥇', '🥈', '🥉']
+  let text = '⚽ <b>Turnauksen maalipörssi</b>\n\n'
+  scorers.forEach((s, i) => {
+    const rank = medals[i] ?? `${i + 1}.`
+    const teamFi = getCountry(s.team.name).name
+    const assists = s.assists ? `, ${s.assists} sy.` : ''
+    text += `${rank} ${s.player.name} (${teamFi}) — ${s.goals} maalia${assists}\n`
+  })
+
+  await sendMessage(target, text.trim())
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function padR(s: string, len: number) { return s.slice(0, len).padEnd(len) }

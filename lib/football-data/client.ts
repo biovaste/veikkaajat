@@ -47,3 +47,15 @@ export async function fetchMatch(externalId: number): Promise<FDMatch> {
   const data = await fetchFD<{ match: FDMatch }>(`/matches/${externalId}`)
   return data.match
 }
+
+export interface FDScorer {
+  player: { name: string }
+  team: { name: string }
+  goals: number
+  assists: number | null
+}
+
+export async function fetchTopScorers(limit = 10): Promise<FDScorer[]> {
+  const data = await fetchFD<{ scorers: FDScorer[] }>(`/competitions/WC/scorers?limit=${limit}`)
+  return data.scorers
+}
