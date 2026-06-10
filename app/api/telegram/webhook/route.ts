@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { sendMessage, sendPhoto, getQuickChartUrl } from '@/lib/telegram/bot'
 import { sendStatsTable, sendChartImage, sendClanWar } from '@/lib/telegram/notify'
+import { pollAndScoreFinishedMatches } from '@/lib/poll-and-score'
 import { createServiceRoleClient } from '@/lib/supabase/server'
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN!
@@ -51,6 +52,34 @@ export async function POST(request: NextRequest) {
       console.error('[webhook /stats]', err)
       await sendMessage(chatId, '⚠️ Tilastot ei onnistu juuri nyt.').catch(console.error)
     })
+  } else if (text === '/haetulos' && isGroup) {
+    // Admin-only: check if sender's Telegram ID matches an admin profile
+    const admin = createServiceRoleClient()
+    const { data: adminProfile } = await admin
+      .from('profiles')
+      .select('id')
+      .eq('telegram_chat_id', String(msg.from.id))
+      .eq('is_admin', true)
+      .maybeSingle()
+
+    if (!adminProfile) {
+      await sendMessage(chatId, '⛔ Vain adminit voivat hakea tuloksia.').catch(console.error)
+    } else {
+      await sendMessage(chatId, '🔄 Haetaan tuloksia…').catch(console.error)
+      try {
+        const result = await pollAndScoreFinishedMatches()
+        if (result.scored > 0) {
+          // Result messages are sent by pollAndScoreFinishedMatches itself
+        } else if (result.checked === 0) {
+          await sendMessage(chatId, 'ℹ️ Ei yhtään käynnissä olevaa tai juuri päättynyttä ottelua.').catch(console.error)
+        } else {
+          await sendMessage(chatId, `ℹ️ Tarkistettiin ${result.checked} ottelu${result.checked === 1 ? '' : 'a'} — ei vielä valmistunut.`).catch(console.error)
+        }
+      } catch (err) {
+        console.error('[webhook /haetulos]', err)
+        await sendMessage(chatId, '⚠️ Tulosten haku epäonnistui.').catch(console.error)
+      }
+    }
   } else if (text === '/luokkasota' && isGroup) {
     await sendClanWar(chatId).catch(async (err) => {
       console.error('[webhook /luokkasota]', err)
@@ -59,7 +88,7 @@ export async function POST(request: NextRequest) {
   } else if (text === '/help') {
     await sendMessage(
       chatId,
-      '📋 <b>Komennot (ryhmässä):</b>\n/chart — pistekehityskaavio\n/stats — tilastotaulukko\n/luokkasota — klaanien pistetilanne\n\n' +
+      '📋 <b>Komennot (ryhmässä):</b>\n/chart — pistekehityskaavio\n/stats — tilastotaulukko\n/luokkasota — klaanien pistetilanne\n/haetulos — hae tulos heti (vain admin)\n\n' +
       'Veikkaa: ' + (process.env.NEXT_PUBLIC_APP_URL ?? ''),
     ).catch(console.error)
   }

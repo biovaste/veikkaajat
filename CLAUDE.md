@@ -139,6 +139,7 @@ lib/
                           # sendStatsTable() — text summary + link to /leaderboard
                           # sendClanWar() — clan rankings for /luokkasota command
   scoring/engine.ts       # calculatePoints() — pure function, unit-tested
+  poll-and-score.ts       # pollAndScoreFinishedMatches() — shared logic for /haetulos and future use
   players.ts              # TOP_SCORER_PLAYERS list (~80 players, no rank field),
                           # sorted by Finnish country name; wildcard helpers
   countries.ts            # getCountry(), flagUrl(), groupLabel()
@@ -156,7 +157,7 @@ app/api/
   admin/invite-player/route.ts        # POST: send magic link invite
   admin/generate-login-link/route.ts  # POST: generate magic link and return URL (admin only, no email sent)
   telegram/
-    webhook/route.ts              # Telegram bot webhook — /start, /chart, /stats, /luokkasota, /help
+    webhook/route.ts              # Telegram bot webhook — /start, /chart, /stats, /luokkasota, /haetulos, /help
 
 proxy.ts                # Next.js proxy (was: middleware): session refresh + auth redirect
                         # Excludes /api/ routes so Telegram webhook isn't redirected to /login
@@ -253,6 +254,7 @@ Bot: `@veikkaajat_apumarko_bot`
 - `/chart` — cumulative points line chart image (QuickChart.io)
 - `/stats` — text summary (rank, pts, KA, exact, days in lead) + link to /leaderboard
 - `/luokkasota` — clan rankings: total + average pts per clan, members listed under each
+- `/haetulos` — admin only; immediately polls football-data.org for any match that kicked off 85+ min ago and isn't scored yet, scores it, and sends the result message
 - `/help` — lists commands
 
 **Commands (DM):**

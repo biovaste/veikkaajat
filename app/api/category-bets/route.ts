@@ -40,7 +40,7 @@ export async function GET() {
   // Correct outcomes set by admin
   const { data: results } = await supabase
     .from('category_results')
-    .select('category, correct_value')
+    .select('category, result_value')
 
   const betsMap: Record<string, string> = {}
   const pointsMap: Record<string, number | null> = {}
@@ -51,7 +51,7 @@ export async function GET() {
 
   const resultsMap: Record<string, string> = {}
   for (const r of results ?? []) {
-    resultsMap[r.category] = r.correct_value
+    resultsMap[r.category] = r.result_value
   }
 
   return NextResponse.json({ bets: betsMap, points: pointsMap, groups, championDeadline, results: resultsMap })

@@ -119,7 +119,7 @@ export default async function MyPredictionsPage() {
       </div>
 
       {/* ── Special bets ── */}
-      {categoryBets && categoryBets.length > 0 && (
+      {(betsOpen || (categoryBets && categoryBets.length > 0)) && (
         <section className="space-y-2">
           <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
             Erikoisveikkaukset
@@ -129,10 +129,10 @@ export default async function MyPredictionsPage() {
             {/* World champion */}
             {(() => {
               const bet = betMap['WORLD_CHAMPION']
-              if (!bet) return null
-              const picked = betsOpen ? null : bet.bet_value
+              if (!bet && !betsOpen) return null
+              const picked = bet?.bet_value ?? null
               const correct = resultMap['WORLD_CHAMPION']
-              const pts = bet.points
+              const pts = bet?.points ?? null
               return (
                 <div className="flex items-center justify-between gap-2 px-4 py-3">
                   <div>
@@ -140,14 +140,15 @@ export default async function MyPredictionsPage() {
                     {picked ? (
                       <div className="flex items-center gap-1.5 text-sm font-medium">
                         {(() => { const { name, code } = getCountry(picked); return (<>{code && <img src={flagUrl(code)} alt={name} width={18} height={14} className="rounded-sm" />}{name}</>) })()}
-                        {correct && picked !== correct && (
+                        {betsOpen && <span className="text-xs text-blue-400 font-normal">muokattavissa</span>}
+                        {!betsOpen && correct && picked !== correct && (
                           <span className="text-xs text-gray-400 ml-1">
                             (oikea: {getCountry(correct).name})
                           </span>
                         )}
                       </div>
                     ) : (
-                      <div className="text-sm text-gray-300 italic">{betsOpen ? 'Veikkaukset auki' : 'Ei veikkausta'}</div>
+                      <div className="text-sm text-gray-300 italic">Ei veikkausta</div>
                     )}
                   </div>
                   <div className="text-right shrink-0">
@@ -164,10 +165,10 @@ export default async function MyPredictionsPage() {
             {/* Top scorer */}
             {(() => {
               const bet = betMap['TOP_SCORER']
-              if (!bet) return null
-              const picked = betsOpen ? null : bet.bet_value
+              if (!bet && !betsOpen) return null
+              const picked = bet?.bet_value ?? null
               const correct = resultMap['TOP_SCORER']
-              const pts = bet.points
+              const pts = bet?.points ?? null
               const pickedLabel = picked
                 ? isWildcard(picked) ? `Muu ${getCountry(wildcardCountry(picked)).name} pelaaja` : picked
                 : null
@@ -179,14 +180,15 @@ export default async function MyPredictionsPage() {
                   <div>
                     <div className="text-xs text-gray-400 mb-0.5">⚽ Paras maalintekijä</div>
                     {pickedLabel ? (
-                      <div className="text-sm font-medium">
+                      <div className="text-sm font-medium flex items-center gap-1.5 flex-wrap">
                         {pickedLabel}
-                        {correctLabel && picked !== correct && (
-                          <span className="text-xs text-gray-400 ml-1">(oikea: {correctLabel})</span>
+                        {betsOpen && <span className="text-xs text-blue-400 font-normal">muokattavissa</span>}
+                        {!betsOpen && correctLabel && picked !== correct && (
+                          <span className="text-xs text-gray-400">(oikea: {correctLabel})</span>
                         )}
                       </div>
                     ) : (
-                      <div className="text-sm text-gray-300 italic">{betsOpen ? 'Veikkaukset auki' : 'Ei veikkausta'}</div>
+                      <div className="text-sm text-gray-300 italic">Ei veikkausta</div>
                     )}
                   </div>
                   <div className="text-right shrink-0">
@@ -208,6 +210,7 @@ export default async function MyPredictionsPage() {
                 const teams: string[] = JSON.parse(bet.bet_value)
                 const correct: string[] = resultMap[bet.category] ? JSON.parse(resultMap[bet.category]) : []
                 const pts = bet.points
+                const groupLocked = !betsOpen
                 return (
                   <div key={bet.category} className="flex items-center justify-between gap-2 px-4 py-3">
                     <div>
@@ -227,6 +230,7 @@ export default async function MyPredictionsPage() {
                             </>
                           )
                         })}
+                        {!groupLocked && <span className="text-xs text-blue-400">muokattavissa</span>}
                       </div>
                     </div>
                     <div className="text-right shrink-0">
