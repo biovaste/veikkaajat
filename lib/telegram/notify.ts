@@ -1,5 +1,5 @@
 import { createServiceRoleClient } from '@/lib/supabase/server'
-import { sendMessage, sendMessageWithMarkup, sendPhoto, sendPhotoBuffer, sendPhotoBytes, getQuickChartUrl, getTableImageBytes } from './bot'
+import { sendMessage, sendMessageWithMarkup, sendPhoto, sendPhotoBuffer, sendPhotoBytes, getQuickChartUrl } from './bot'
 import { getCountry } from '../countries'
 import { isWildcard, wildcardCountry } from '../players'
 import { calculatePoints } from '../scoring/engine'
@@ -301,42 +301,45 @@ export async function sendStatsTable(chatId?: number | string): Promise<void> {
   const hasBonus = !categoryBetsOpen && sorted.some(s => s.bonus > 0)
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? ''
 
-  // Full stats board as a table image (same columns as /leaderboard)
-  const tableData = {
-    title: `MM 2026 — Tilastot (${scoredMatches} ottelua)`,
-    columns: [
-      { title: '#', dataIndex: 'rank', width: 36, align: 'center' },
-      { title: 'Pelaaja', dataIndex: 'name', width: 130, align: 'left' },
-      { title: 'Pts', dataIndex: 'pts', width: 50, align: 'center' },
-      { title: 'KA', dataIndex: 'ka', width: 50, align: 'center' },
-      { title: 'Tark', dataIndex: 'tark', width: 50, align: 'center' },
-      { title: 'Mrk%', dataIndex: 'mrk', width: 56, align: 'center' },
-      { title: 'Nol%', dataIndex: 'nol', width: 56, align: 'center' },
-      { title: 'L-KA', dataIndex: 'lka', width: 56, align: 'center' },
-      { title: 'J-KA', dataIndex: 'jka', width: 56, align: 'center' },
-      { title: 'Tas%', dataIndex: 'tas', width: 56, align: 'center' },
-      { title: 'Yllätys%', dataIndex: 'yll', width: 72, align: 'center' },
-      { title: 'Jht', dataIndex: 'jht', width: 44, align: 'center' },
-      ...(hasXg ? [{ title: 'xG-Pts', dataIndex: 'xg', width: 60, align: 'center' }] : []),
-      ...(hasBonus ? [{ title: 'Bonus', dataIndex: 'bonus', width: 56, align: 'center' }] : []),
-    ],
-    dataSource: sorted.map((s, i) => ({
-      rank: String(i + 1),
-      name: s.display_name,
-      pts: String(s.total),
-      ka: avg(s.total - s.bonus, s.matches),
-      tark: String(s.exact),
-      mrk: pct(s.correct_result, s.matches),
-      nol: pct(s.zero_matches, s.matches),
-      lka: avg(s.group_pts, s.group_n),
-      jka: avg(s.knockout_pts, s.knockout_n),
-      tas: pct(s.draw_correct, s.draw_preds),
-      yll: pct(s.yllatys_correct, s.yllatys_total),
-      jht: String(s.lead_count),
-      ...(hasXg ? { xg: s.xg_n > 0 ? String(s.xg_pts) : '–' } : {}),
-      ...(hasBonus ? { bonus: s.bonus > 0 ? `+${s.bonus}` : '–' } : {}),
-    })),
-  }
+  // Cells carry both the display string and a numeric value for the color scale
+  const pctCell = (n: number, d: number) => ({ display: pct(n, d), num: d > 0 ? n / d * 100 : null })
+  const avgCell = (p: number, n: number) => ({ display: avg(p, n), num: n > 0 ? p / n : null })
+  const numCell = (v: number) => ({ display: String(v), num: v })
+
+  // Full stats board as an image (same columns as /leaderboard),
+  // each stat color-coded green (best) → red (worst)
+  const columns = [
+    { key: 'pts', label: 'Pts' },
+    { key: 'ka', label: 'KA' },
+    { key: 'tark', label: 'Tark' },
+    { key: 'mrk', label: 'Mrk%' },
+    { key: 'nol', label: 'Nol%', lowerIsBetter: true },
+    { key: 'lka', label: 'L-KA' },
+    { key: 'jka', label: 'J-KA' },
+    { key: 'tas', label: 'Tas%' },
+    { key: 'yll', label: 'Yllätys%' },
+    { key: 'jht', label: 'Jht' },
+    ...(hasXg ? [{ key: 'xg', label: 'xG-Pts' }] : []),
+    ...(hasBonus ? [{ key: 'bonus', label: 'Bonus' }] : []),
+  ]
+  const rows = sorted.map((s, i) => ({
+    rank: i + 1,
+    name: s.display_name,
+    cells: {
+      pts: numCell(s.total),
+      ka: avgCell(s.total - s.bonus, s.matches),
+      tark: numCell(s.exact),
+      mrk: pctCell(s.correct_result, s.matches),
+      nol: pctCell(s.zero_matches, s.matches),
+      lka: avgCell(s.group_pts, s.group_n),
+      jka: avgCell(s.knockout_pts, s.knockout_n),
+      tas: pctCell(s.draw_correct, s.draw_preds),
+      yll: pctCell(s.yllatys_correct, s.yllatys_total),
+      jht: numCell(s.lead_count),
+      ...(hasXg ? { xg: s.xg_n > 0 ? numCell(s.xg_pts) : { display: '–', num: null } } : {}),
+      ...(hasBonus ? { bonus: s.bonus > 0 ? { display: `+${s.bonus}`, num: s.bonus } : { display: '–', num: null } } : {}),
+    },
+  }))
 
   const caption =
     `📊 <b>MM 2026 — Tilastot — ${scoredMatches} ottelua</b>\n` +
@@ -345,7 +348,8 @@ export async function sendStatsTable(chatId?: number | string): Promise<void> {
     `🔗 ${appUrl}/leaderboard`
 
   try {
-    const png = await getTableImageBytes(tableData, { backgroundColor: '#ffffff' })
+    const { renderStatsImage } = await import('./stats-image')
+    const png = await renderStatsImage(`MM 2026 — Tilastot (${scoredMatches} ottelua)`, columns, rows)
     await sendPhotoBytes(target, png, caption)
   } catch (err) {
     // Fall back to the plain text summary if image generation fails

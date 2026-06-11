@@ -86,20 +86,6 @@ export async function sendPhotoBuffer(
   await sendPhotoBytes(chatId, await imgRes.arrayBuffer(), caption)
 }
 
-// POST table config to QuickChart's table image API, returns PNG bytes
-export async function getTableImageBytes(
-  data: object,
-  options?: object,
-): Promise<ArrayBuffer> {
-  const res = await fetch('https://api.quickchart.io/v1/table', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ data, ...(options ? { options } : {}) }),
-  })
-  if (!res.ok) throw new Error(`QuickChart table error: ${await res.text()}`)
-  return res.arrayBuffer()
-}
-
 // POST chart config to QuickChart, returns a stable shareable URL
 export async function getQuickChartUrl(
   chartConfig: object,

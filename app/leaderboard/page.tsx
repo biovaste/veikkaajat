@@ -2,6 +2,7 @@ import { createServerClient, createServiceRoleClient } from '@/lib/supabase/serv
 import { redirect } from 'next/navigation'
 import PointsChart from '@/components/PointsChart'
 import ChatBox from '@/components/ChatBox'
+import StatsTable, { type StatRowDef, type StatPlayer } from '@/components/StatsTable'
 import { calculatePoints } from '@/lib/scoring/engine'
 import { assignColors } from '@/lib/colors'
 
@@ -240,24 +241,49 @@ export default async function LeaderboardPage() {
   const avg = (pts: number, n: number) => n > 0 ? (pts / n).toFixed(1).replace('.', ',') : '–'
 
   // ── Stats rows definition (transposed table) ────────────────────────────────
+  // Serializable data for the client-side sortable table: each cell carries
+  // the display string and a numeric value for sorting.
 
-  type StatRow = { label: string; title: string; value: (s: typeof sorted[0]) => string; bold?: boolean }
-  const statRows: StatRow[] = [
-    { label: 'Pts',      title: 'Pisteet yhteensä',                              bold: true, value: s => String(s.total) },
-    { label: 'KA',       title: 'Pistekeskiarvo (tulosvedot)',                               value: s => avg(s.match_pts, s.matches) },
-    { label: 'Tark',     title: 'Täysosumat (oikea tulos ja molemmat maalit)',               value: s => String(s.exact) },
-    { label: 'Mrk%',     title: 'Oikeat merkit %',                                           value: s => pct(s.correct_result, s.matches) },
-    { label: 'Nol%',     title: 'Nollaottelut %',                                            value: s => pct(s.zero_matches, s.matches) },
-    { label: 'L-KA',     title: 'Lohkovaihe KA',                                            value: s => avg(s.group_pts, s.group_n) },
-    { label: 'J-KA',     title: 'Jatkopelit KA',                                            value: s => avg(s.knockout_pts, s.knockout_n) },
-    { label: 'Tas%',     title: 'Tasurihakujen osuma %',                                    value: s => pct(s.draw_correct, s.draw_preds) },
-    { label: 'Yllätys%', title: 'Oikea merkki kun ≤25% veikkasi samoin',                   value: s => pct(s.yllatys_correct, s.yllatys_total) },
-    { label: 'Jht',      title: 'Päiviä johdossa',                                          value: s => String(s.lead_count) },
-    ...(hasXg ? [{ label: 'xG-Pts', title: 'xG:n mukainen pistetilanne', value: (s: typeof sorted[0]) => s.xg_n > 0 ? String(s.xg_pts) : '–' }] : []),
-    ...(!categoryBetsOpen && sorted.some(x => x.bonus > 0)
-      ? [{ label: 'Bonus', title: 'Erikoisveikkausten bonus', value: (s: typeof sorted[0]) => s.bonus > 0 ? `+${s.bonus}` : '–' }]
-      : []),
+  const hasBonus = !categoryBetsOpen && sorted.some(x => x.bonus > 0)
+
+  const pctCell = (n: number, d: number) => ({ display: pct(n, d), num: d > 0 ? n / d * 100 : null })
+  const avgCell = (p: number, n: number) => ({ display: avg(p, n), num: n > 0 ? p / n : null })
+  const numCell = (v: number) => ({ display: String(v), num: v })
+
+  const statRowDefs: StatRowDef[] = [
+    { key: 'pts',  label: 'Pts',      title: 'Pisteet yhteensä', bold: true },
+    { key: 'ka',   label: 'KA',       title: 'Pistekeskiarvo (tulosvedot)' },
+    { key: 'tark', label: 'Tark',     title: 'Täysosumat (oikea tulos ja molemmat maalit)' },
+    { key: 'mrk',  label: 'Mrk%',     title: 'Oikeat merkit %' },
+    { key: 'nol',  label: 'Nol%',     title: 'Nollaottelut %', lowerIsBetter: true },
+    { key: 'lka',  label: 'L-KA',     title: 'Lohkovaihe KA' },
+    { key: 'jka',  label: 'J-KA',     title: 'Jatkopelit KA' },
+    { key: 'tas',  label: 'Tas%',     title: 'Tasurihakujen osuma %' },
+    { key: 'yll',  label: 'Yllätys%', title: 'Oikea merkki kun ≤25% veikkasi samoin' },
+    { key: 'jht',  label: 'Jht',      title: 'Päiviä johdossa' },
+    ...(hasXg ? [{ key: 'xg', label: 'xG-Pts', title: 'xG:n mukainen pistetilanne' }] : []),
+    ...(hasBonus ? [{ key: 'bonus', label: 'Bonus', title: 'Erikoisveikkausten bonus' }] : []),
   ]
+
+  const statPlayers: StatPlayer[] = sorted.map(s => ({
+    id: s.id,
+    name: s.display_name,
+    isMe: s.id === myId,
+    cells: {
+      pts: numCell(s.total),
+      ka: avgCell(s.match_pts, s.matches),
+      tark: numCell(s.exact),
+      mrk: pctCell(s.correct_result, s.matches),
+      nol: pctCell(s.zero_matches, s.matches),
+      lka: avgCell(s.group_pts, s.group_n),
+      jka: avgCell(s.knockout_pts, s.knockout_n),
+      tas: pctCell(s.draw_correct, s.draw_preds),
+      yll: pctCell(s.yllatys_correct, s.yllatys_total),
+      jht: numCell(s.lead_count),
+      ...(hasXg ? { xg: s.xg_n > 0 ? numCell(s.xg_pts) : { display: '–', num: null } } : {}),
+      ...(hasBonus ? { bonus: s.bonus > 0 ? { display: `+${s.bonus}`, num: s.bonus } : { display: '–', num: null } } : {}),
+    },
+  }))
 
   return (
     <div className="space-y-6">
@@ -306,62 +332,11 @@ export default async function LeaderboardPage() {
           {(
             <div className="space-y-2">
               <h2 className="text-lg font-semibold">Tilastot</h2>
-              <div className="bg-white rounded-lg border border-gray-200 overflow-x-auto">
-                <table className="text-xs whitespace-nowrap w-full">
-                  <thead className="bg-gray-50 border-b border-gray-200">
-                    <tr>
-                      {/* Stat label column header */}
-                      <th className="sticky left-0 bg-gray-50 px-3 py-2 w-20" />
-                      {sorted.map((p, i) => {
-                        const isMe = p.id === myId
-                        const isLeader = i === 0
-                        return (
-                          <th
-                            key={p.id}
-                            className={`px-2 pt-2 pb-1 text-center font-medium ${isMe ? 'bg-blue-50' : isLeader ? 'bg-yellow-50' : 'bg-gray-50'}`}
-                          >
-                            {/* Vertically rotated player name */}
-                            <div
-                              className="inline-block text-gray-700"
-                              style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)', height: '5rem', fontSize: '11px' }}
-                            >
-                              {p.display_name}
-                              {isMe && ' ★'}
-                            </div>
-                          </th>
-                        )
-                      })}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {statRows.map((row, ri) => (
-                      <tr key={row.label} className={ri % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}>
-                        <td
-                          className="sticky left-0 px-3 py-1.5 font-semibold text-gray-500 bg-inherit border-r border-gray-100"
-                          title={row.title}
-                        >
-                          {row.label}
-                        </td>
-                        {sorted.map((p, i) => {
-                          const isMe = p.id === myId
-                          const isLeader = i === 0
-                          return (
-                            <td
-                              key={p.id}
-                              className={`px-2 py-1.5 text-center ${row.bold ? 'font-bold' : ''} ${isMe ? 'bg-blue-50' : isLeader ? 'bg-yellow-50' : ''}`}
-                            >
-                              {row.value(p)}
-                            </td>
-                          )
-                        })}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <StatsTable rows={statRowDefs} players={statPlayers} />
 
               {/* Legend */}
               <p className="text-xs text-gray-400 leading-relaxed">
+                Järjestä klikkaamalla tilastoriviä. ·
                 KA=pistekeskiarvo · Tark=täysosumat · Mrk%=oikeat merkit · Nol%=nollaottelut ·
                 L-KA=lohkovaihe KA · J-KA=jatkopelit KA · Tas%=tasurihakujen osuma ·
                 Yllätys%=oikea merkki kun ≤25% veikkasi samoin · Jht=päiviä johdossa
