@@ -113,6 +113,15 @@ export async function POST(request: NextRequest) {
       console.error('[webhook /luokkasota]', err)
       await sendMessage(chatId, '⚠️ Luokkasota ei onnistu juuri nyt.').catch(console.error)
     })
+  } else if (text === '/chatid') {
+    // Diagnostic: report this chat's id and whether it matches the configured group id
+    const configured = process.env.TELEGRAM_GROUP_CHAT_ID ?? ''
+    const matches = String(chatId) === configured
+    await sendMessage(
+      chatId,
+      `Chat ID: <code>${chatId}</code>\n` +
+      (isGroup ? (matches ? '✅ Vastaa asetettua TELEGRAM_GROUP_CHAT_ID:tä.' : '⚠️ EI vastaa asetettua TELEGRAM_GROUP_CHAT_ID:tä!') : ''),
+    ).catch(console.error)
   } else if (text === '/veikkaukset' && isDM) {
     await handleVeikkaukset(chatId, msg.from.id).catch(async (err) => {
       console.error('[webhook /veikkaukset]', err)

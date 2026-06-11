@@ -117,12 +117,18 @@ function getFiChannel(home: string, away: string): string | null {
   return FI_CHANNELS[`${home}|${away}`] ?? null
 }
 
-async function tgSend(chatId: string | number, text: string, replyMarkup?: object) {
-  await fetch(`${TG}/sendMessage`, {
+async function tgSend(chatId: string | number, text: string, replyMarkup?: object): Promise<string | null> {
+  const res = await fetch(`${TG}/sendMessage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML', ...(replyMarkup ? { reply_markup: replyMarkup } : {}) }),
   })
+  if (!res.ok) {
+    const err = await res.text()
+    console.error(`[tgSend] chat ${chatId} failed: ${res.status} ${err}`)
+    return err
+  }
+  return null
 }
 
 // Helsinki is EEST (UTC+3) during WC 2026 (June–July)
@@ -156,6 +162,8 @@ Deno.serve(async (_req) => {
   })
 
   const now = new Date()
+  // Telegram send outcomes, returned in the response for observability
+  const sendResults: { match: number; kind: string; error: string | null }[] = []
 
   // ── Predictions-reveal messages ─────────────────────────────────────────────
   // Betting closes 5 min before kickoff, so the message can go out as soon as
@@ -198,9 +206,13 @@ Deno.serve(async (_req) => {
     if (predLines.length) text += predLines.join('\n') + '\n'
     if (notPredicted.length) text += `\n<i>Ei veikannut: ${notPredicted.join(', ')}</i>`
 
-    await tgSend(GROUP_CHAT_ID, text)
+    const error = await tgSend(GROUP_CHAT_ID, text)
+    sendResults.push({ match: match.id, kind: 'kickoff', error })
 
-    await db.from('matches').update({ kickoff_msg_sent: true }).eq('id', match.id)
+    // Only mark sent if Telegram accepted the message, so failures retry next run
+    if (!error) {
+      await db.from('matches').update({ kickoff_msg_sent: true }).eq('id', match.id)
+    }
   }
 
   // ── Reminder DMs ────────────────────────────────────────────────────────────
@@ -241,17 +253,18 @@ Deno.serve(async (_req) => {
         `⏰ Muistutus!\n` +
         `<b>${match.home_team} – ${match.away_team}</b> alkaa pian.\n` +
         `Et ole vielä veikannut tätä ottelua.`
-      await tgSend(player.telegram_chat_id!, text, {
+      const error = await tgSend(player.telegram_chat_id!, text, {
         inline_keyboard: [[
           { text: '✏️ Veikkaa nyt', callback_data: `edit:${match.id}` },
         ]],
       })
+      sendResults.push({ match: match.id, kind: 'reminder', error })
     }
 
     await db.from('matches').update({ reminder_sent: true }).eq('id', match.id)
   }
 
-  return new Response(JSON.stringify({ ok: true }), {
+  return new Response(JSON.stringify({ ok: true, sendResults }), {
     headers: { 'Content-Type': 'application/json' },
   })
 })
