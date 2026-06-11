@@ -16,6 +16,7 @@ export default async function MyPredictionsPage() {
     { data: categoryBets },
     { data: categoryResults },
     { data: firstMatch },
+    { data: groupMatches },
   ] = await Promise.all([
     supabase
       .from('predictions')
@@ -35,9 +36,20 @@ export default async function MyPredictionsPage() {
       .order('kickoff_at', { ascending: true })
       .limit(1)
       .maybeSingle(),
+    supabase
+      .from('matches')
+      .select('group_name, kickoff_at')
+      .not('group_name', 'is', null)
+      .order('kickoff_at', { ascending: true }),
   ])
 
   const betsOpen = !firstMatch?.kickoff_at || new Date() < new Date(firstMatch.kickoff_at)
+
+  // Each group's bets close at that group's first match kickoff
+  const groupDeadlines: Record<string, string> = {}
+  for (const m of groupMatches ?? []) {
+    if (m.group_name && !groupDeadlines[m.group_name]) groupDeadlines[m.group_name] = m.kickoff_at
+  }
   const betMap = Object.fromEntries((categoryBets ?? []).map(b => [b.category, b]))
   const resultMap = Object.fromEntries((categoryResults ?? []).map(r => [r.category, r.result_value]))
 
@@ -210,7 +222,9 @@ export default async function MyPredictionsPage() {
                 const teams: string[] = JSON.parse(bet.bet_value)
                 const correct: string[] = resultMap[bet.category] ? JSON.parse(resultMap[bet.category]) : []
                 const pts = bet.points
-                const groupLocked = !betsOpen
+                const groupLocked = groupDeadlines[bet.category]
+                  ? new Date(groupDeadlines[bet.category]) <= new Date()
+                  : !betsOpen
                 return (
                   <div key={bet.category} className="flex items-center justify-between gap-2 px-4 py-3">
                     <div>
