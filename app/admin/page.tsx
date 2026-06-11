@@ -33,6 +33,13 @@ export default function AdminPage() {
           <div className="font-medium">Erikoisveikkaukset</div>
           <div className="text-sm text-gray-500 mt-0.5">Pisteytä maailmanmestari ja lohkojen jatkajat</div>
         </Link>
+        <Link
+          href="/admin/upcoming"
+          className="block p-4 bg-white rounded-lg border border-gray-200 hover:border-blue-300 transition-colors"
+        >
+          <div className="font-medium">Sulkeutuvat pian</div>
+          <div className="text-sm text-gray-500 mt-0.5">Veikkaukset sulkeutuvat seuraavan 24h aikana</div>
+        </Link>
       </div>
     </div>
   )

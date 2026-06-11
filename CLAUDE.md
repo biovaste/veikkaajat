@@ -135,10 +135,12 @@ lib/
   football-data/client.ts # fetchMatches(), fetchMatch()
   api-football/client.ts  # findAfFixtureId(), fetchFixtureXg() — xG from api-sports.io
   telegram/
-    bot.ts                # sendMessage(), sendPhoto(), sendPhotoBuffer(), getQuickChartUrl()
+    bot.ts                # sendMessage(), sendMessageWithMarkup(), answerCallbackQuery(),
+                          # sendPhoto(), sendPhotoBuffer(), getQuickChartUrl()
     notify.ts             # sendKickoffMessage(), sendResultMessage(), sendReminderDM(),
                           # sendStatsTable() — text summary + link to /leaderboard
                           # sendClanWar() — clan rankings for /luokkasota command
+                          # sendTopScorers() — top 10 scorers for /maaliporssi command
   scoring/engine.ts       # calculatePoints() — pure function, unit-tested
   poll-and-score.ts       # pollAndScoreFinishedMatches() — shared logic for /haetulos (available to all group members)
   players.ts              # TOP_SCORER_PLAYERS list (~80 players, no rank field),
@@ -158,7 +160,8 @@ app/api/
   admin/invite-player/route.ts        # POST: send magic link invite
   admin/generate-login-link/route.ts  # POST: generate magic link and return URL (admin only, no email sent)
   telegram/
-    webhook/route.ts              # Telegram bot webhook — /start, /chart, /stats, /luokkasota, /maaliporssi, /haetulos, /help
+    webhook/route.ts              # Telegram bot webhook — /start, /chart, /stats, /luokkasota, /maaliporssi, /haetulos, /help (group)
+                                  # /veikkaukset (DM); callback_query handler for edit:{matchId}; ForceReply prediction editing
 
 proxy.ts                # Next.js proxy (was: middleware): session refresh + auth redirect
                         # Excludes /api/ routes so Telegram webhook isn't redirected to /login
@@ -249,7 +252,7 @@ Bot: `@veikkaajat_apumarko_bot`
 **Automatic messages:**
 - 🔔 Kickoff message (group): shows all predictions when match starts
 - ⚽ Result message (group): result, per-player points, leaderboard with ↑↓→ arrows
-- ⏰ Reminder DM: sent 30 min before kickoff (or at 22:00 Helsinki for matches starting 23:00–05:00)
+- ⏰ Reminder DM: sent 30 min before kickoff (or at 22:00 Helsinki for matches starting 23:00–05:00); includes "✏️ Veikkaa nyt" inline button to edit directly via bot
 
 **Commands (group):**
 - `/chart` — cumulative points line chart image (QuickChart.io)
@@ -261,6 +264,12 @@ Bot: `@veikkaajat_apumarko_bot`
 
 **Commands (DM):**
 - `/start` — bot replies with the user's Telegram chat ID
+- `/veikkaukset` — shows the user's predictions for the next 5 open matches; each has an "✏️ Muokkaa / Veikkaa" inline button
+
+**Inline prediction editing (DM):**
+- Tapping an edit button triggers a ForceReply prompt: `"Syötä veikkauksesi ottelulle #ID …"`
+- User replies with `2-1`; bot parses, enforces the 5-min deadline, saves via service role, confirms
+- Works from both `/veikkaukset` and reminder DM buttons
 
 **Day-in-lead counting:** grouped by Helsinki calendar day with 10:00 Helsinki cutoff (UTC−7 shift), so US late-night matches fall under the correct gameday.
 
@@ -334,6 +343,10 @@ npm test           # vitest unit tests
 - Enable Realtime for chat_messages: `ALTER PUBLICATION supabase_realtime ADD TABLE public.chat_messages;`
 - `/maaliporssi` Telegram command: fetches top 10 scorers from `GET /v4/competitions/WC/scorers`; shows player, Finnish country name, goals, assists; `fetchTopScorers()` in `lib/football-data/client.ts`, `sendTopScorers()` in `lib/telegram/notify.ts`
 - `/haetulos` opened to all group members (was admin-only)
+- `/veikkaukset` DM command: shows next 5 open match predictions with inline "✏️ Muokkaa / Veikkaa" buttons
+- Inline prediction editing via Telegram: ForceReply flow — user taps button → bot prompts with `#matchId` embedded → user replies `2-1` → saved via service role with deadline check
+- Reminder DMs now include "✏️ Veikkaa nyt" inline button (same edit flow); edge function `check-upcoming-matches` updated
+- `lib/telegram/bot.ts` extended with `sendMessageWithMarkup()` and `answerCallbackQuery()`
 
 ### ✅ Phase 5b — Leaderboard & Stats
 - Leaderboard: `force-dynamic`, auth guard, all-player predictions via service role

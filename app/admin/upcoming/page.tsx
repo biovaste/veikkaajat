@@ -1,0 +1,112 @@
+import { createServerClient } from '@/lib/supabase/server'
+import { redirect } from 'next/navigation'
+import { getCountry, flagUrl } from '@/lib/countries'
+import { formatDate } from '@/lib/utils'
+
+export const revalidate = 0
+
+export default async function UpcomingPage() {
+  const supabase = await createServerClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
+
+  const now = new Date()
+  const in24h = new Date(now.getTime() + 24 * 60 * 60 * 1000)
+  // Deadline = kickoff - 5 min, so kickoff must be between now+5min and now+24h+5min
+  const kickoffFrom = new Date(now.getTime() + 5 * 60 * 1000)
+  const kickoffTo   = new Date(in24h.getTime() + 5 * 60 * 1000)
+
+  const [{ data: matches }, { data: allPlayers }] = await Promise.all([
+    supabase
+      .from('matches')
+      .select('id, home_team, away_team, kickoff_at')
+      .eq('status', 'SCHEDULED')
+      .is('home_score', null)
+      .gt('kickoff_at', kickoffFrom.toISOString())
+      .lte('kickoff_at', kickoffTo.toISOString())
+      .order('kickoff_at', { ascending: true }),
+    supabase
+      .from('profiles')
+      .select('id, display_name')
+      .order('display_name'),
+  ])
+
+  const playerCount = allPlayers?.length ?? 0
+
+  // Fetch predictions for all upcoming matches in one query
+  const matchIds = (matches ?? []).map(m => m.id)
+  const { data: predictions } = matchIds.length > 0
+    ? await supabase
+        .from('predictions')
+        .select('match_id, user_id')
+        .in('match_id', matchIds)
+    : { data: [] }
+
+  const predsByMatch: Record<number, Set<string>> = {}
+  for (const p of predictions ?? []) {
+    if (!predsByMatch[p.match_id]) predsByMatch[p.match_id] = new Set()
+    predsByMatch[p.match_id].add(p.user_id)
+  }
+
+  return (
+    <div className="space-y-6">
+      <h1 className="text-2xl font-bold">Sulkeutuvat pian</h1>
+
+      {(!matches || matches.length === 0) ? (
+        <p className="text-sm text-gray-400">Ei sulkeutuvia kohteita seuraavan 24 tunnin aikana.</p>
+      ) : (
+        <div className="space-y-3">
+          {matches.map(match => {
+            const deadline = new Date(new Date(match.kickoff_at).getTime() - 5 * 60 * 1000)
+            const predicted = predsByMatch[match.id] ?? new Set()
+            const missing = (allPlayers ?? []).filter(p => !predicted.has(p.id))
+            const home = getCountry(match.home_team)
+            const away = getCountry(match.away_team)
+
+            const minsUntil = Math.round((deadline.getTime() - now.getTime()) / 60_000)
+            const urgency = minsUntil < 60 ? 'border-red-300 bg-red-50' : minsUntil < 180 ? 'border-yellow-300 bg-yellow-50' : 'border-gray-200 bg-white'
+
+            return (
+              <div key={match.id} className={`rounded-lg border px-4 py-3 ${urgency}`}>
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <div className="font-medium text-sm flex items-center gap-1 flex-wrap">
+                      {home.code && <img src={flagUrl(home.code)} alt={home.name} width={18} height={14} className="rounded-sm" />}
+                      {home.name}
+                      <span className="text-gray-400">–</span>
+                      {away.code && <img src={flagUrl(away.code)} alt={away.name} width={18} height={14} className="rounded-sm" />}
+                      {away.name}
+                    </div>
+                    <div className="text-xs text-gray-500 mt-0.5">
+                      Sulkeutuu: {formatDate(deadline.toISOString())}
+                      {minsUntil < 60 && <span className="ml-1 font-semibold text-red-600">({minsUntil} min)</span>}
+                    </div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <div className={`text-sm font-bold ${predicted.size === playerCount ? 'text-green-600' : 'text-gray-700'}`}>
+                      {predicted.size} / {playerCount}
+                    </div>
+                    <div className="text-xs text-gray-400">veikannut</div>
+                  </div>
+                </div>
+
+                {missing.length > 0 && (
+                  <div className="mt-2 pt-2 border-t border-gray-200">
+                    <div className="text-xs text-gray-500 mb-1">Puuttuu:</div>
+                    <div className="flex flex-wrap gap-1">
+                      {missing.map(p => (
+                        <span key={p.id} className="text-xs bg-gray-100 text-gray-600 rounded px-1.5 py-0.5">
+                          {p.display_name}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}

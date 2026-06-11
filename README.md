@@ -10,7 +10,7 @@ A full-stack score prediction app for the 2026 FIFA World Cup, built for a priva
 - **Live leaderboard** — 12 computed stats per player including prediction accuracy, days in the lead, and xG-adjusted points; transposed table with cumulative points chart
 - **Automated result polling** — Supabase Edge Function polls football-data.org every 30 min, scores predictions, and posts a result summary to Telegram
 - **xG data** — expected goals fetched from api-football.com after each match and shown alongside actual results
-- **Telegram bot** — automatic kickoff previews, result messages with leaderboard arrows, personalised pre-match reminder DMs; `/chart`, `/stats`, `/luokkasota`, `/maaliporssi` commands; `/haetulos` for on-demand result fetching
+- **Telegram bot** — automatic kickoff previews, result messages with leaderboard arrows, personalised pre-match reminder DMs with inline edit buttons; `/chart`, `/stats`, `/luokkasota`, `/maaliporssi`, `/haetulos` group commands; `/veikkaukset` DM command with inline prediction editing (ForceReply flow, deadline enforced)
 - **Clan war** — players join one of three clans; `/luokkasota` shows clan rankings by average points
 - **Live chat** — real-time chat on the leaderboard page via Supabase Realtime
 

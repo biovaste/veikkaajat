@@ -13,6 +13,110 @@ const APP_URL = Deno.env.get('NEXT_PUBLIC_APP_URL') ?? ''
 
 const TG = `https://api.telegram.org/bot${BOT_TOKEN}`
 
+// Finnish TV channels for group stage matches.
+// Keys are "HomeTeam|AwayTeam" using English names as stored in the DB (from football-data.org).
+// Note: team names must match DB exactly — check matches table if a channel isn't showing.
+const MTV3 = 'MTV3 & MTV Katsomo+ Urheilu'
+const YLE  = 'Yle TV2 & Yle Areena'
+const KATSOMO  = 'MTV Katsomo+ Urheilu'
+const YLE_AREENA = 'Yle Areena'
+
+const FI_CHANNELS: Record<string, string> = {
+  // Matchday 1 — Thu 11 Jun
+  'Mexico|South Africa':            MTV3,
+  'South Korea|Czech Republic':     MTV3,
+  // Matchday 1 — Fri 12 Jun
+  'Canada|Bosnia and Herzegovina':  YLE,
+  'United States|Paraguay':         YLE,
+  // Matchday 1 — Sat 13 Jun
+  'Qatar|Switzerland':              MTV3,
+  'Brazil|Morocco':                 MTV3,
+  'Haiti|Scotland':                 KATSOMO,
+  'Australia|Turkey':               KATSOMO,
+  // Matchday 1 — Sun 14 Jun
+  'Germany|Curaçao':                YLE,
+  'Netherlands|Japan':              YLE,
+  'Ivory Coast|Ecuador':            YLE,
+  'Sweden|Tunisia':                 YLE,
+  // Matchday 1 — Mon 15 Jun
+  'Spain|Cape Verde':               MTV3,
+  'Belgium|Egypt':                  MTV3,
+  'Saudi Arabia|Uruguay':           KATSOMO,
+  'Iran|New Zealand':               KATSOMO,
+  // Matchday 1 — Tue 16 Jun
+  'France|Senegal':                 YLE,
+  'Iraq|Norway':                    YLE,
+  'Argentina|Algeria':              YLE,
+  'Austria|Jordan':                 YLE,
+  // Matchday 1 — Wed 17 Jun
+  'Portugal|DR Congo':              MTV3,
+  'England|Croatia':                MTV3,
+  'Ghana|Panama':                   KATSOMO,
+  'Uzbekistan|Colombia':            KATSOMO,
+  // Matchday 2 — Thu 18 Jun
+  'Czech Republic|South Africa':    YLE,
+  'Switzerland|Bosnia and Herzegovina': YLE,
+  'Canada|Qatar':                   YLE,
+  'Mexico|South Korea':             YLE,
+  // Matchday 2 — Fri 19 Jun
+  'United States|Australia':        MTV3,
+  'Scotland|Morocco':               MTV3,
+  'Brazil|Haiti':                   KATSOMO,
+  'Turkey|Paraguay':                KATSOMO,
+  // Matchday 2 — Sat 20 Jun
+  'Netherlands|Sweden':             YLE,
+  'Germany|Ivory Coast':            YLE,
+  'Ecuador|Curaçao':                YLE,
+  'Tunisia|Japan':                  YLE,
+  // Matchday 2 — Sun 21 Jun
+  'Spain|Saudi Arabia':             MTV3,
+  'Belgium|Iran':                   MTV3,
+  'Uruguay|Cape Verde':             KATSOMO,
+  'New Zealand|Egypt':              KATSOMO,
+  // Matchday 2 — Mon 22 Jun
+  'Argentina|Austria':              YLE,
+  'France|Iraq':                    YLE,
+  'Norway|Senegal':                 YLE,
+  'Jordan|Algeria':                 YLE,
+  // Matchday 2 — Tue 23 Jun
+  'Portugal|Uzbekistan':            MTV3,
+  'England|Ghana':                  MTV3,
+  'Panama|Croatia':                 KATSOMO,
+  'Colombia|DR Congo':              KATSOMO,
+  // Matchday 3 — Wed 24 Jun
+  'Switzerland|Canada':             YLE,
+  'Bosnia and Herzegovina|Qatar':   YLE_AREENA,
+  'Scotland|Brazil':                YLE,
+  'Morocco|Haiti':                  YLE_AREENA,
+  'Czech Republic|Mexico':          YLE,
+  'South Africa|South Korea':       YLE_AREENA,
+  // Matchday 3 — Thu 25 Jun
+  'Ecuador|Germany':                MTV3,
+  'Curaçao|Ivory Coast':            KATSOMO,
+  'Japan|Sweden':                   MTV3,
+  'Tunisia|Netherlands':            KATSOMO,
+  'Turkey|United States':           KATSOMO,
+  'Paraguay|Australia':             KATSOMO,
+  // Matchday 3 — Fri 26 Jun
+  'Norway|France':                  YLE,
+  'Senegal|Iraq':                   YLE_AREENA,
+  'Cape Verde|Saudi Arabia':        YLE_AREENA,
+  'Uruguay|Spain':                  YLE,
+  'Egypt|Iran':                     YLE,
+  'New Zealand|Belgium':            YLE_AREENA,
+  // Matchday 3 — Sat 27 Jun
+  'Croatia|Ghana':                  MTV3,
+  'Panama|England':                 KATSOMO,
+  'Colombia|Portugal':              MTV3,
+  'DR Congo|Uzbekistan':            KATSOMO,
+  'Algeria|Austria':                YLE,
+  'Jordan|Argentina':               YLE,
+}
+
+function getFiChannel(home: string, away: string): string | null {
+  return FI_CHANNELS[`${home}|${away}`] ?? null
+}
+
 async function tgSend(chatId: string | number, text: string, replyMarkup?: object) {
   await fetch(`${TG}/sendMessage`, {
     method: 'POST',
@@ -84,7 +188,10 @@ Deno.serve(async (_req) => {
       return `${name}: ${p.home_score_pred}–${p.away_score_pred}`
     })
 
-    let text = `🔔 <b>${match.home_team} – ${match.away_team}</b>\n\n<b>Veikkaukset:</b>\n`
+    const channel = getFiChannel(match.home_team, match.away_team)
+    let text = `🔔 <b>${match.home_team} – ${match.away_team}</b>\n`
+    if (channel) text += `📺 ${channel}\n`
+    text += `\n<b>Veikkaukset:</b>\n`
     if (predLines.length) text += predLines.join('\n') + '\n'
     if (notPredicted.length) text += `\n<i>Ei veikannut: ${notPredicted.join(', ')}</i>`
 

@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import './globals.css'
 import { createServerClient } from '@/lib/supabase/server'
 import Nav from '@/components/Nav'
+import AudioPlayer from '@/components/AudioPlayer'
 
 export const metadata: Metadata = {
   title: 'Veikkaajat — MM 2026',
@@ -39,6 +40,7 @@ export default async function RootLayout({
         <main className="max-w-2xl mx-auto px-4 py-6">
           {children}
         </main>
+        {user && <AudioPlayer />}
       </body>
     </html>
   )
