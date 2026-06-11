@@ -1,19 +1,36 @@
 const BASE = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}`
 
+async function callTelegram(method: string, body: object): Promise<unknown> {
+  const res = await fetch(`${BASE}/${method}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    const err = await res.text()
+    console.error(`[telegram] ${method} failed: ${err}`)
+  }
+  return res.json().catch(() => null)
+}
+
 export async function sendMessage(
   chatId: string | number,
   text: string,
   parseMode: 'HTML' | 'MarkdownV2' = 'HTML',
 ): Promise<void> {
-  const res = await fetch(`${BASE}/sendMessage`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: chatId, text, parse_mode: parseMode }),
-  })
-  if (!res.ok) {
-    const err = await res.text()
-    console.error(`[telegram] sendMessage failed: ${err}`)
-  }
+  await callTelegram('sendMessage', { chat_id: chatId, text, parse_mode: parseMode })
+}
+
+export async function sendMessageWithMarkup(
+  chatId: string | number,
+  text: string,
+  replyMarkup: object,
+): Promise<void> {
+  await callTelegram('sendMessage', { chat_id: chatId, text, parse_mode: 'HTML', reply_markup: replyMarkup })
+}
+
+export async function answerCallbackQuery(callbackQueryId: string, text?: string): Promise<void> {
+  await callTelegram('answerCallbackQuery', { callback_query_id: callbackQueryId, ...(text ? { text } : {}) })
 }
 
 export async function sendPhoto(

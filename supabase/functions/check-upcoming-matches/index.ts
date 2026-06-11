@@ -13,11 +13,11 @@ const APP_URL = Deno.env.get('NEXT_PUBLIC_APP_URL') ?? ''
 
 const TG = `https://api.telegram.org/bot${BOT_TOKEN}`
 
-async function tgSend(chatId: string | number, text: string) {
+async function tgSend(chatId: string | number, text: string, replyMarkup?: object) {
   await fetch(`${TG}/sendMessage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML' }),
+    body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML', ...(replyMarkup ? { reply_markup: replyMarkup } : {}) }),
   })
 }
 
@@ -130,9 +130,12 @@ Deno.serve(async (_req) => {
       const text =
         `⏰ Muistutus!\n` +
         `<b>${match.home_team} – ${match.away_team}</b> alkaa pian.\n` +
-        `Et ole vielä veikannut tätä ottelua.\n` +
-        `Veikkaa: ${APP_URL}/matches`
-      await tgSend(player.telegram_chat_id!, text)
+        `Et ole vielä veikannut tätä ottelua.`
+      await tgSend(player.telegram_chat_id!, text, {
+        inline_keyboard: [[
+          { text: '✏️ Veikkaa nyt', callback_data: `edit:${match.id}` },
+        ]],
+      })
     }
 
     await db.from('matches').update({ reminder_sent: true }).eq('id', match.id)

@@ -1,5 +1,5 @@
 import { createServiceRoleClient } from '@/lib/supabase/server'
-import { sendMessage, sendPhoto, sendPhotoBuffer, getQuickChartUrl } from './bot'
+import { sendMessage, sendMessageWithMarkup, sendPhoto, sendPhotoBuffer, getQuickChartUrl } from './bot'
 import { getCountry } from '../countries'
 import { isWildcard, wildcardCountry } from '../players'
 import { calculatePoints } from '../scoring/engine'
@@ -111,14 +111,17 @@ export async function sendResultMessage(
 
 export async function sendReminderDM(
   chatId: string,
-  match: Pick<MatchInfo, 'home_team' | 'away_team'>,
+  match: Pick<MatchInfo, 'id' | 'home_team' | 'away_team'>,
 ): Promise<void> {
   const text =
     `⏰ Muistutus!\n` +
     `<b>${match.home_team} – ${match.away_team}</b> alkaa pian.\n` +
-    `Et ole vielä veikannut tätä ottelua.\n` +
-    `Veikkaa: ${APP_URL}/matches`
-  await sendMessage(chatId, text)
+    `Et ole vielä veikannut tätä ottelua.`
+  await sendMessageWithMarkup(chatId, text, {
+    inline_keyboard: [[
+      { text: '✏️ Veikkaa nyt', callback_data: `edit:${match.id}` },
+    ]],
+  })
 }
 
 // ─── Stats table ─────────────────────────────────────────────────────────────

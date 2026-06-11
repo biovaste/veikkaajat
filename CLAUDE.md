@@ -140,7 +140,7 @@ lib/
                           # sendStatsTable() — text summary + link to /leaderboard
                           # sendClanWar() — clan rankings for /luokkasota command
   scoring/engine.ts       # calculatePoints() — pure function, unit-tested
-  poll-and-score.ts       # pollAndScoreFinishedMatches() — shared logic for /haetulos and future use
+  poll-and-score.ts       # pollAndScoreFinishedMatches() — shared logic for /haetulos (available to all group members)
   players.ts              # TOP_SCORER_PLAYERS list (~80 players, no rank field),
                           # sorted by Finnish country name; wildcard helpers
   countries.ts            # getCountry(), flagUrl(), groupLabel()
@@ -158,7 +158,7 @@ app/api/
   admin/invite-player/route.ts        # POST: send magic link invite
   admin/generate-login-link/route.ts  # POST: generate magic link and return URL (admin only, no email sent)
   telegram/
-    webhook/route.ts              # Telegram bot webhook — /start, /chart, /stats, /luokkasota, /haetulos, /help
+    webhook/route.ts              # Telegram bot webhook — /start, /chart, /stats, /luokkasota, /maaliporssi, /haetulos, /help
 
 proxy.ts                # Next.js proxy (was: middleware): session refresh + auth redirect
                         # Excludes /api/ routes so Telegram webhook isn't redirected to /login
@@ -255,7 +255,8 @@ Bot: `@veikkaajat_apumarko_bot`
 - `/chart` — cumulative points line chart image (QuickChart.io)
 - `/stats` — text summary (rank, pts, KA, exact, days in lead) + link to /leaderboard
 - `/luokkasota` — clan rankings: total + average pts per clan, members listed under each
-- `/haetulos` — admin only; immediately polls football-data.org for any match that kicked off 85+ min ago and isn't scored yet, scores it, and sends the result message
+- `/maaliporssi` — top 10 tournament scorers from football-data.org (player, Finnish country name, goals, assists)
+- `/haetulos` — available to all group members; immediately polls football-data.org for any match that kicked off 85+ min ago and isn't scored yet, scores it, and sends the result message
 - `/help` — lists commands
 
 **Commands (DM):**
@@ -331,6 +332,8 @@ npm test           # vitest unit tests
 - Login link generator: `POST /api/admin/generate-login-link` uses `auth.admin.generateLink()` (service role); button in `/admin/players` copies link to clipboard — no email needed
 - Live chat on `/leaderboard`: `ChatBox` client component, `chat_messages` table (migration 0012), Supabase Realtime for instant updates, iMessage-style UI, own messages deletable on hover
 - Enable Realtime for chat_messages: `ALTER PUBLICATION supabase_realtime ADD TABLE public.chat_messages;`
+- `/maaliporssi` Telegram command: fetches top 10 scorers from `GET /v4/competitions/WC/scorers`; shows player, Finnish country name, goals, assists; `fetchTopScorers()` in `lib/football-data/client.ts`, `sendTopScorers()` in `lib/telegram/notify.ts`
+- `/haetulos` opened to all group members (was admin-only)
 
 ### ✅ Phase 5b — Leaderboard & Stats
 - Leaderboard: `force-dynamic`, auth guard, all-player predictions via service role
