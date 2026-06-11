@@ -1,7 +1,7 @@
 // Supabase Edge Function: check-upcoming-matches
 // Runs every 5 minutes via pg_cron.
 // - Sends reminder DMs to players who haven't predicted (30 min before, or 22:00 for late-night)
-// - Sends kickoff group message when match starts
+// - Sends predictions-reveal group message when betting closes (5 min before kickoff)
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
@@ -157,16 +157,19 @@ Deno.serve(async (_req) => {
 
   const now = new Date()
 
-  // ── Kickoff messages ────────────────────────────────────────────────────────
-  // Matches that kicked off in the last 5 minutes, message not yet sent
-  const kickoffWindow = new Date(now.getTime() - 5 * 60 * 1000)
+  // ── Predictions-reveal messages ─────────────────────────────────────────────
+  // Betting closes 5 min before kickoff, so the message can go out as soon as
+  // kickoff_at − 5 min ≤ now, i.e. kickoff_at ≤ now + 5 min. The lower bound is
+  // a catch-up window for missed cron runs; kickoff_msg_sent prevents duplicates.
+  const deadlinePassed = new Date(now.getTime() + 5 * 60 * 1000)
+  const catchUpWindow = new Date(now.getTime() - 60 * 60 * 1000)
 
   const { data: kMatches } = await db
     .from('matches')
     .select('id, home_team, away_team, kickoff_at')
     .eq('kickoff_msg_sent', false)
-    .lte('kickoff_at', now.toISOString())
-    .gte('kickoff_at', kickoffWindow.toISOString())
+    .lte('kickoff_at', deadlinePassed.toISOString())
+    .gte('kickoff_at', catchUpWindow.toISOString())
 
   for (const match of kMatches ?? []) {
     // Fetch all predictions for this match with player names

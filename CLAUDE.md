@@ -105,6 +105,9 @@ app/
   leaderboard/page.tsx    # Leaderboard + cumulative chart + transposed stats table
                           # force-dynamic; predictions via service role for full stats
   matches/page.tsx        # Fixture list + prediction entry
+  predictions/page.tsx    # All players' predictions for CLOSED targets: matches past the
+                          # 5-min deadline (with points once scored) + special bets after
+                          # their deadlines (champion/scorer table, group picks per closed group)
   my-predictions/page.tsx # Player's own predictions + points + special bets summary
                           # Special bets always visible; "muokattavissa" tag while open; correct answers revealed after deadline
   bets/page.tsx           # Special bets: champion, top scorer (country-grouped + search),
@@ -125,6 +128,8 @@ components/
   PredictionForm.tsx      # Score input (home : away), optimistic save
   CountdownTimer.tsx      # Client component, updates every 30s
   PointsChart.tsx         # Recharts line chart; accepts colors[] prop (one per player)
+  StatsTable.tsx          # Client component: transposed stats table; click a stat row to sort
+                          # player columns by it (best first, click again to reverse); default Pts
   ChatBox.tsx             # Client component: live chat on leaderboard page
                           # Supabase Realtime subscription; iMessage-style bubbles; own messages deletable
 
@@ -136,11 +141,12 @@ lib/
   api-football/client.ts  # findAfFixtureId(), fetchFixtureXg() — xG from api-sports.io
   telegram/
     bot.ts                # sendMessage(), sendMessageWithMarkup(), answerCallbackQuery(),
-                          # sendPhoto(), sendPhotoBuffer(), sendPhotoBytes(),
-                          # getQuickChartUrl(), getTableImageBytes() — QuickChart table API → PNG
+                          # sendPhoto(), sendPhotoBuffer(), sendPhotoBytes(), getQuickChartUrl()
     notify.ts             # sendKickoffMessage(), sendResultMessage(), sendReminderDM(),
-                          # sendStatsTable() — full stats board as table image (QuickChart),
+                          # sendStatsTable() — full stats board image via stats-image.tsx,
                           #   falls back to text summary if image generation fails
+    stats-image.tsx       # renderStatsImage() — next/og (Satori) PNG renderer;
+                          # per-stat heatmap: green (best) → red (worst), lowerIsBetter flag for Nol%
                           # sendClanWar() — clan rankings for /luokkasota command
                           # sendTopScorers() — top 10 scorers for /maaliporssi command
   scoring/engine.ts       # calculatePoints() — pure function, unit-tested
@@ -184,7 +190,8 @@ supabase/
     0012_chat.sql                 # chat_messages table + RLS (read all, insert/delete own)
   functions/
     poll-match-results/index.ts      # Deno: polls football-data.org, scores, fetches xG, sends result message
-    check-upcoming-matches/index.ts  # Deno: sends reminder DMs + kickoff group message
+    check-upcoming-matches/index.ts  # Deno: sends reminder DMs + predictions-reveal group message
+                                     # (sent when betting closes, 5 min before kickoff)
 
 types/
   database.ts            # Hand-written types (replace with supabase gen types)
@@ -252,13 +259,13 @@ Free tier: 100 req/day — sufficient (1 lookup + 1 stats call per match, ~64 ma
 Bot: `@veikkaajat_apumarko_bot`
 
 **Automatic messages:**
-- 🔔 Kickoff message (group): shows all predictions when match starts
+- 🔔 Predictions-reveal message (group): shows all predictions as soon as betting closes (5 min before kickoff; sent by the 5-min cron, so it lands between deadline and kickoff)
 - ⚽ Result message (group): result, per-player points, leaderboard with ↑↓→ arrows
 - ⏰ Reminder DM: sent 30 min before kickoff (or at 22:00 Helsinki for matches starting 23:00–05:00); includes "✏️ Veikkaa nyt" inline button to edit directly via bot
 
 **Commands (group):**
 - `/chart` — cumulative points line chart image (QuickChart.io)
-- `/stats` — full stats board image (same columns as /leaderboard: Pts, KA, Tark, Mrk%, Nol%, L-KA, J-KA, Tas%, Yllätys%, Jht, xG-Pts, Bonus) via QuickChart table API; caption has legend + link; falls back to text summary on error
+- `/stats` — full stats board image (same columns as /leaderboard: Pts, KA, Tark, Mrk%, Nol%, L-KA, J-KA, Tas%, Yllätys%, Jht, xG-Pts, Bonus) rendered with next/og; each stat cell color-coded green (best) → red (worst); caption has legend + link; falls back to text summary on error
 - `/luokkasota` — clan rankings: total + average pts per clan, members listed under each
 - `/maaliporssi` — top 10 tournament scorers from football-data.org (player, Finnish country name, goals, assists)
 - `/haetulos` — available to all group members; immediately polls football-data.org for any match that kicked off 85+ min ago and isn't scored yet, scores it, and sends the result message
