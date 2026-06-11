@@ -1,5 +1,5 @@
 import { createServiceRoleClient } from '@/lib/supabase/server'
-import { sendMessage, sendMessageWithMarkup, sendPhoto, sendPhotoBuffer, getQuickChartUrl } from './bot'
+import { sendMessage, sendMessageWithMarkup, sendPhoto, sendPhotoBuffer, sendPhotoBytes, getQuickChartUrl, getTableImageBytes } from './bot'
 import { getCountry } from '../countries'
 import { isWildcard, wildcardCountry } from '../players'
 import { calculatePoints } from '../scoring/engine'
@@ -158,11 +158,9 @@ export async function sendStatsTable(chatId?: number | string): Promise<void> {
     group_pts: number; group_n: number
     knockout_pts: number; knockout_n: number
     draw_preds: number; draw_correct: number
-    decisive_preds: number; decisive_correct: number
+    yllatys_correct: number; yllatys_total: number
     lead_count: number
     xg_pts: number; xg_n: number
-    champion_bet: string | null
-    scorer_bet: string | null
   }
 
   const stats: Record<string, PlayerStats> = {}
@@ -171,10 +169,9 @@ export async function sendStatsTable(chatId?: number | string): Promise<void> {
       display_name: p.display_name, total: 0, bonus: 0, matches: 0,
       exact: 0, correct_result: 0, zero_matches: 0,
       group_pts: 0, group_n: 0, knockout_pts: 0, knockout_n: 0,
-      draw_preds: 0, draw_correct: 0, decisive_preds: 0, decisive_correct: 0,
+      draw_preds: 0, draw_correct: 0, yllatys_correct: 0, yllatys_total: 0,
       lead_count: 0,
       xg_pts: 0, xg_n: 0,
-      champion_bet: null, scorer_bet: null,
     }
   }
 
@@ -235,11 +232,6 @@ export async function sendStatsTable(chatId?: number | string): Promise<void> {
     const s = stats[row.user_id]
     if (!s) continue
     if (row.points !== null) { s.total += row.points; s.bonus += row.points }
-    // Only reveal picks after betting has closed
-    if (!categoryBetsOpen) {
-      if (row.category === 'WORLD_CHAMPION') s.champion_bet = row.bet_value
-      if (row.category === 'TOP_SCORER') s.scorer_bet = row.bet_value
-    }
   }
 
   // Draw / decisive prediction accuracy + xG-based points
@@ -252,29 +244,51 @@ export async function sendStatsTable(chatId?: number | string): Promise<void> {
   }
   const hasXg = Object.keys(xgByMatch).length > 0
 
+  // Group prediction signs by match for Yllätys%
+  type PredEntry = { user_id: string; pred_sign: number; actual_sign: number }
+  const predsByMatch: Record<number, PredEntry[]> = {}
+
   for (const row of preds ?? []) {
     const s = stats[row.user_id]
-    if (!s) continue
     const m = Array.isArray(row.matches) ? row.matches[0] : row.matches
     if (!m || m.status !== 'FINISHED' || m.home_score === null || m.away_score === null) continue
 
-    // Draw / decisive accuracy
-    const predDraw = row.home_score_pred === row.away_score_pred
-    const actualDraw = m.home_score === m.away_score
-    if (predDraw) { s.draw_preds++; if (actualDraw) s.draw_correct++ }
-    else { s.decisive_preds++; if (!actualDraw) s.decisive_correct++ }
+    const pred_sign = Math.sign(row.home_score_pred - row.away_score_pred)
+    const actual_sign = Math.sign(m.home_score - m.away_score)
 
-    // xG-based points: recalculate using rounded xG as the "actual" result
-    const xg = xgByMatch[row.match_id]
-    if (xg) {
-      const xgHome = Math.round(xg.home_xg)
-      const xgAway = Math.round(xg.away_xg)
-      const { total } = calculatePoints(
-        { home: row.home_score_pred, away: row.away_score_pred },
-        { home: xgHome, away: xgAway },
-      )
-      s.xg_pts += total
-      s.xg_n += 1
+    if (s) {
+      // Draw accuracy
+      if (pred_sign === 0) { s.draw_preds++; if (actual_sign === 0) s.draw_correct++ }
+
+      // xG-based points: recalculate using rounded xG as the "actual" result
+      const xg = xgByMatch[row.match_id]
+      if (xg) {
+        const { total } = calculatePoints(
+          { home: row.home_score_pred, away: row.away_score_pred },
+          { home: Math.round(xg.home_xg), away: Math.round(xg.away_xg) },
+        )
+        s.xg_pts += total
+        s.xg_n += 1
+      }
+    }
+
+    if (!predsByMatch[row.match_id]) predsByMatch[row.match_id] = []
+    predsByMatch[row.match_id].push({ user_id: row.user_id, pred_sign, actual_sign })
+  }
+
+  // Yllätys%: player predicted a minority result (≤25% of predictors chose the same sign)
+  for (const entries of Object.values(predsByMatch)) {
+    const total = entries.length
+    if (total === 0) continue
+    const signCount: Record<number, number> = {}
+    for (const { pred_sign } of entries) signCount[pred_sign] = (signCount[pred_sign] ?? 0) + 1
+    for (const { user_id, pred_sign, actual_sign } of entries) {
+      const fraction = (signCount[pred_sign] ?? 0) / total
+      if (fraction > 0.25) continue // majority prediction — doesn't count
+      const s = stats[user_id]
+      if (!s) continue
+      s.yllatys_total++
+      if (pred_sign === actual_sign) s.yllatys_correct++
     }
   }
 
@@ -284,18 +298,67 @@ export async function sendStatsTable(chatId?: number | string): Promise<void> {
   const pct = (n: number, d: number) => d > 0 ? Math.round(n / d * 100) + '%' : '–'
   const avg = (pts: number, n: number) => n > 0 ? (pts / n).toFixed(1).replace('.', ',') : '–'
 
-  const hasBets = !categoryBetsOpen && sorted.some(s => s.champion_bet || s.scorer_bet)
-
-  // Text summary + link to full stats on /leaderboard
-  const lines = sorted.map((s, i) =>
-    `${i + 1}. ${s.display_name} — ${s.total} p  KA ${avg(s.total - s.bonus, s.matches)}  Tark ${s.exact}  Jht ${s.lead_count}`
-  )
+  const hasBonus = !categoryBetsOpen && sorted.some(s => s.bonus > 0)
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? ''
-  const text =
-    `📊 <b>MM 2026 — Tilastot — ${scoredMatches} ottelua</b>\n\n` +
-    `<code>${lines.join('\n')}</code>\n\n` +
-    `🔗 Kaikki tilastot: ${appUrl}/leaderboard`
-  await sendMessage(target, text)
+
+  // Full stats board as a table image (same columns as /leaderboard)
+  const tableData = {
+    title: `MM 2026 — Tilastot (${scoredMatches} ottelua)`,
+    columns: [
+      { title: '#', dataIndex: 'rank', width: 36, align: 'center' },
+      { title: 'Pelaaja', dataIndex: 'name', width: 130, align: 'left' },
+      { title: 'Pts', dataIndex: 'pts', width: 50, align: 'center' },
+      { title: 'KA', dataIndex: 'ka', width: 50, align: 'center' },
+      { title: 'Tark', dataIndex: 'tark', width: 50, align: 'center' },
+      { title: 'Mrk%', dataIndex: 'mrk', width: 56, align: 'center' },
+      { title: 'Nol%', dataIndex: 'nol', width: 56, align: 'center' },
+      { title: 'L-KA', dataIndex: 'lka', width: 56, align: 'center' },
+      { title: 'J-KA', dataIndex: 'jka', width: 56, align: 'center' },
+      { title: 'Tas%', dataIndex: 'tas', width: 56, align: 'center' },
+      { title: 'Yllätys%', dataIndex: 'yll', width: 72, align: 'center' },
+      { title: 'Jht', dataIndex: 'jht', width: 44, align: 'center' },
+      ...(hasXg ? [{ title: 'xG-Pts', dataIndex: 'xg', width: 60, align: 'center' }] : []),
+      ...(hasBonus ? [{ title: 'Bonus', dataIndex: 'bonus', width: 56, align: 'center' }] : []),
+    ],
+    dataSource: sorted.map((s, i) => ({
+      rank: String(i + 1),
+      name: s.display_name,
+      pts: String(s.total),
+      ka: avg(s.total - s.bonus, s.matches),
+      tark: String(s.exact),
+      mrk: pct(s.correct_result, s.matches),
+      nol: pct(s.zero_matches, s.matches),
+      lka: avg(s.group_pts, s.group_n),
+      jka: avg(s.knockout_pts, s.knockout_n),
+      tas: pct(s.draw_correct, s.draw_preds),
+      yll: pct(s.yllatys_correct, s.yllatys_total),
+      jht: String(s.lead_count),
+      ...(hasXg ? { xg: s.xg_n > 0 ? String(s.xg_pts) : '–' } : {}),
+      ...(hasBonus ? { bonus: s.bonus > 0 ? `+${s.bonus}` : '–' } : {}),
+    })),
+  }
+
+  const caption =
+    `📊 <b>MM 2026 — Tilastot — ${scoredMatches} ottelua</b>\n` +
+    `<i>KA=pistekeskiarvo · Tark=täysosumat · Mrk%=oikeat merkit · Nol%=nollaottelut · ` +
+    `L-KA=lohkovaihe · J-KA=jatkopelit · Tas%=tasurit · Yllätys%=oikea merkki kun ≤25% veikkasi samoin · Jht=päiviä johdossa</i>\n` +
+    `🔗 ${appUrl}/leaderboard`
+
+  try {
+    const png = await getTableImageBytes(tableData, { backgroundColor: '#ffffff' })
+    await sendPhotoBytes(target, png, caption)
+  } catch (err) {
+    // Fall back to the plain text summary if image generation fails
+    console.error('[stats] table image failed, falling back to text:', err)
+    const lines = sorted.map((s, i) =>
+      `${i + 1}. ${s.display_name} — ${s.total} p  KA ${avg(s.total - s.bonus, s.matches)}  Tark ${s.exact}  Jht ${s.lead_count}`
+    )
+    const text =
+      `📊 <b>MM 2026 — Tilastot — ${scoredMatches} ottelua</b>\n\n` +
+      `<code>${lines.join('\n')}</code>\n\n` +
+      `🔗 Kaikki tilastot: ${appUrl}/leaderboard`
+    await sendMessage(target, text)
+  }
 }
 
 // ─── Chart image ─────────────────────────────────────────────────────────────

@@ -54,28 +54,50 @@ export async function sendPhoto(
   }
 }
 
+/** Send raw PNG bytes as a file upload */
+export async function sendPhotoBytes(
+  chatId: string | number,
+  bytes: ArrayBuffer,
+  caption?: string,
+): Promise<void> {
+  const form = new FormData()
+  form.append('chat_id', String(chatId))
+  form.append('photo', new Blob([bytes], { type: 'image/png' }), 'stats.png')
+  if (caption) {
+    form.append('caption', caption)
+    form.append('parse_mode', 'HTML')
+  }
+
+  const res = await fetch(`${BASE}/sendPhoto`, { method: 'POST', body: form })
+  if (!res.ok) {
+    const err = await res.text()
+    throw new Error(`[telegram] sendPhotoBytes failed: ${err}`)
+  }
+}
+
 /** Fetch an image URL and send it as a file upload (bypasses Telegram's URL size/format limits) */
 export async function sendPhotoBuffer(
   chatId: string | number,
   imageUrl: string,
   caption?: string,
 ): Promise<void> {
-  // Fetch the image
   const imgRes = await fetch(imageUrl)
   if (!imgRes.ok) throw new Error(`Image fetch failed: ${imgRes.status}`)
-  const buffer = await imgRes.arrayBuffer()
+  await sendPhotoBytes(chatId, await imgRes.arrayBuffer(), caption)
+}
 
-  // Upload as multipart/form-data
-  const form = new FormData()
-  form.append('chat_id', String(chatId))
-  form.append('photo', new Blob([buffer], { type: 'image/png' }), 'stats.png')
-  if (caption) form.append('caption', caption)
-
-  const res = await fetch(`${BASE}/sendPhoto`, { method: 'POST', body: form })
-  if (!res.ok) {
-    const err = await res.text()
-    throw new Error(`[telegram] sendPhotoBuffer failed: ${err}`)
-  }
+// POST table config to QuickChart's table image API, returns PNG bytes
+export async function getTableImageBytes(
+  data: object,
+  options?: object,
+): Promise<ArrayBuffer> {
+  const res = await fetch('https://api.quickchart.io/v1/table', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ data, ...(options ? { options } : {}) }),
+  })
+  if (!res.ok) throw new Error(`QuickChart table error: ${await res.text()}`)
+  return res.arrayBuffer()
 }
 
 // POST chart config to QuickChart, returns a stable shareable URL

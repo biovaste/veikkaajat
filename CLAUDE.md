@@ -136,9 +136,11 @@ lib/
   api-football/client.ts  # findAfFixtureId(), fetchFixtureXg() — xG from api-sports.io
   telegram/
     bot.ts                # sendMessage(), sendMessageWithMarkup(), answerCallbackQuery(),
-                          # sendPhoto(), sendPhotoBuffer(), getQuickChartUrl()
+                          # sendPhoto(), sendPhotoBuffer(), sendPhotoBytes(),
+                          # getQuickChartUrl(), getTableImageBytes() — QuickChart table API → PNG
     notify.ts             # sendKickoffMessage(), sendResultMessage(), sendReminderDM(),
-                          # sendStatsTable() — text summary + link to /leaderboard
+                          # sendStatsTable() — full stats board as table image (QuickChart),
+                          #   falls back to text summary if image generation fails
                           # sendClanWar() — clan rankings for /luokkasota command
                           # sendTopScorers() — top 10 scorers for /maaliporssi command
   scoring/engine.ts       # calculatePoints() — pure function, unit-tested
@@ -256,7 +258,7 @@ Bot: `@veikkaajat_apumarko_bot`
 
 **Commands (group):**
 - `/chart` — cumulative points line chart image (QuickChart.io)
-- `/stats` — text summary (rank, pts, KA, exact, days in lead) + link to /leaderboard
+- `/stats` — full stats board image (same columns as /leaderboard: Pts, KA, Tark, Mrk%, Nol%, L-KA, J-KA, Tas%, Yllätys%, Jht, xG-Pts, Bonus) via QuickChart table API; caption has legend + link; falls back to text summary on error
 - `/luokkasota` — clan rankings: total + average pts per clan, members listed under each
 - `/maaliporssi` — top 10 tournament scorers from football-data.org (player, Finnish country name, goals, assists)
 - `/haetulos` — available to all group members; immediately polls football-data.org for any match that kicked off 85+ min ago and isn't scored yet, scores it, and sends the result message
@@ -273,7 +275,7 @@ Bot: `@veikkaajat_apumarko_bot`
 
 **Day-in-lead counting:** grouped by Helsinki calendar day with 10:00 Helsinki cutoff (UTC−7 shift), so US late-night matches fall under the correct gameday.
 
-**Special bet picks** in `/stats` are hidden until the first match has kicked off (betting deadline).
+**Bonus column** in `/stats` appears only after the betting deadline (first match kickoff) and only if someone has scored bonus points.
 
 ## Build & Run
 
