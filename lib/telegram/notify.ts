@@ -161,6 +161,8 @@ export async function sendStatsTable(chatId?: number | string): Promise<void> {
     yllatys_correct: number; yllatys_total: number
     lead_count: number
     xg_pts: number; xg_n: number
+    champion_bet: string | null
+    scorer_bet: string | null
   }
 
   const stats: Record<string, PlayerStats> = {}
@@ -172,6 +174,7 @@ export async function sendStatsTable(chatId?: number | string): Promise<void> {
       draw_preds: 0, draw_correct: 0, yllatys_correct: 0, yllatys_total: 0,
       lead_count: 0,
       xg_pts: 0, xg_n: 0,
+      champion_bet: null, scorer_bet: null,
     }
   }
 
@@ -232,6 +235,11 @@ export async function sendStatsTable(chatId?: number | string): Promise<void> {
     const s = stats[row.user_id]
     if (!s) continue
     if (row.points !== null) { s.total += row.points; s.bonus += row.points }
+    // Only reveal picks after betting has closed
+    if (!categoryBetsOpen) {
+      if (row.category === 'WORLD_CHAMPION') s.champion_bet = row.bet_value
+      if (row.category === 'TOP_SCORER') s.scorer_bet = row.bet_value
+    }
   }
 
   // Draw / decisive prediction accuracy + xG-based points
@@ -299,7 +307,11 @@ export async function sendStatsTable(chatId?: number | string): Promise<void> {
   const avg = (pts: number, n: number) => n > 0 ? (pts / n).toFixed(1).replace('.', ',') : '–'
 
   const hasBonus = !categoryBetsOpen && sorted.some(s => s.bonus > 0)
+  const hasPicks = !categoryBetsOpen && sorted.some(s => s.champion_bet || s.scorer_bet)
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? ''
+
+  const scorerLabel = (v: string) =>
+    isWildcard(v) ? `Muu ${getCountry(wildcardCountry(v)).name} pelaaja` : v
 
   // Cells carry both the display string and a numeric value for the color scale
   const pctCell = (n: number, d: number) => ({ display: pct(n, d), num: d > 0 ? n / d * 100 : null })
@@ -321,6 +333,10 @@ export async function sendStatsTable(chatId?: number | string): Promise<void> {
     { key: 'jht', label: 'Jht' },
     ...(hasXg ? [{ key: 'xg', label: 'xG-Pts' }] : []),
     ...(hasBonus ? [{ key: 'bonus', label: 'Bonus' }] : []),
+    ...(hasPicks ? [
+      { key: 'champ', label: 'Mestari', width: 130, align: 'left' as const },
+      { key: 'scorer', label: 'Maalikuningas', width: 160, align: 'left' as const },
+    ] : []),
   ]
   const rows = sorted.map((s, i) => ({
     rank: i + 1,
@@ -338,6 +354,10 @@ export async function sendStatsTable(chatId?: number | string): Promise<void> {
       jht: numCell(s.lead_count),
       ...(hasXg ? { xg: s.xg_n > 0 ? numCell(s.xg_pts) : { display: '–', num: null } } : {}),
       ...(hasBonus ? { bonus: s.bonus > 0 ? { display: `+${s.bonus}`, num: s.bonus } : { display: '–', num: null } } : {}),
+      ...(hasPicks ? {
+        champ: { display: s.champion_bet ? truncate(getCountry(s.champion_bet).name, 16) : '–', num: null },
+        scorer: { display: s.scorer_bet ? truncate(scorerLabel(s.scorer_bet), 21) : '–', num: null },
+      } : {}),
     },
   }))
 

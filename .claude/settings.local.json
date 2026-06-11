@@ -27,7 +27,9 @@
       "Bash(npm run *)",
       "Bash(cp \"C:\\\\Users\\\\henri\\\\Downloads\\\\Telegram Desktop\\\\El travesaño de Luis Suárez_26.mp3\" \"E:\\\\claude\\\\veikkaajat\\\\public\\\\theme.mp3\")",
       "WebFetch(domain:quickchart.io)",
-      "PowerShell(npx tsc --noEmit)"
+      "PowerShell(npx tsc --noEmit)",
+      "PowerShell(if \\(Test-Path \"$env:APPDATA\\\\supabase\\\\access-token\"\\) { Write-Output \"token file exists\" } else { Write-Output \"no token file\"; Get-ChildItem \"$env:APPDATA\\\\supabase\" -ErrorAction SilentlyContinue | Select-Object Name })",
+      "Bash(node verify-cron.mjs)"
     ]
   }
 }

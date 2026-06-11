@@ -265,7 +265,7 @@ Bot: `@veikkaajat_apumarko_bot`
 
 **Commands (group):**
 - `/chart` — cumulative points line chart image (QuickChart.io)
-- `/stats` — full stats board image (same columns as /leaderboard: Pts, KA, Tark, Mrk%, Nol%, L-KA, J-KA, Tas%, Yllätys%, Jht, xG-Pts, Bonus) rendered with next/og; each stat cell color-coded green (best) → red (worst); caption has legend + link; falls back to text summary on error
+- `/stats` — full stats board image (same columns as /leaderboard: Pts, KA, Tark, Mrk%, Nol%, L-KA, J-KA, Tas%, Yllätys%, Jht, xG-Pts, Bonus) rendered with next/og; each stat cell color-coded green (best) → red (worst); after the betting deadline also Mestari + Maalikuningas pick columns (uncolored text); caption has legend + link; falls back to text summary on error
 - `/luokkasota` — clan rankings: total + average pts per clan, members listed under each
 - `/maaliporssi` — top 10 tournament scorers from football-data.org (player, Finnish country name, goals, assists)
 - `/haetulos` — available to all group members; immediately polls football-data.org for any match that kicked off 85+ min ago and isn't scored yet, scores it, and sends the result message
@@ -337,7 +337,7 @@ npm test           # vitest unit tests
 ### ✅ Phase 5 — Automated Polling
 - `poll-match-results` edge function: runs every 30 min, polls football-data.org, scores predictions, fetches xG, sends Telegram result message
 - `check-upcoming-matches` edge function: runs every 5 min, sends reminder DMs and kickoff messages
-- pg_cron jobs registered in Supabase
+- pg_cron jobs registered in Supabase — canonical SQL in `supabase/cron.sql` (substitute project ref + anon key!); verify with `cron.job_run_details` and `net._http_response` after changes
 - xG fetched from api-football.com and stored on match row (`af_fixture_id` cached)
 
 ### ✅ Phase 5c — Clan War

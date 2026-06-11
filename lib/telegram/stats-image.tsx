@@ -5,6 +5,10 @@ export interface ImgColumn {
   label: string
   /** For stats where a lower value is better (e.g. Nol%) */
   lowerIsBetter?: boolean
+  /** Column width in px (default 62) — wider for text columns like picks */
+  width?: number
+  /** Text alignment (default center) */
+  align?: 'left' | 'center'
 }
 
 export interface ImgCell {
@@ -54,7 +58,8 @@ export async function renderStatsImage(
     return heatColor(col.lowerIsBetter ? 1 - t : t)
   }
 
-  const width = PAD * 2 + RANK_W + NAME_W + STAT_W * columns.length
+  const colW = (col: ImgColumn) => col.width ?? STAT_W
+  const width = PAD * 2 + RANK_W + NAME_W + columns.reduce((sum, c) => sum + colW(c), 0)
   const height = PAD * 2 + 40 + ROW_H * (rows.length + 1)
 
   const cellStyle = (w: number, align: 'flex-start' | 'center' = 'center') => ({
@@ -63,7 +68,11 @@ export async function renderStatsImage(
     height: ROW_H,
     alignItems: 'center' as const,
     justifyContent: align,
+    ...(align === 'flex-start' ? { paddingLeft: 8 } : {}),
   })
+
+  const colCellStyle = (col: ImgColumn) =>
+    cellStyle(colW(col), col.align === 'left' ? 'flex-start' : 'center')
 
   const resp = new ImageResponse(
     (
@@ -84,9 +93,9 @@ export async function renderStatsImage(
         {/* Header row */}
         <div style={{ display: 'flex', backgroundColor: '#f3f4f6', fontWeight: 700, fontSize: 13 }}>
           <div style={cellStyle(RANK_W)}>#</div>
-          <div style={{ ...cellStyle(NAME_W, 'flex-start'), paddingLeft: 8 }}>Pelaaja</div>
+          <div style={cellStyle(NAME_W, 'flex-start')}>Pelaaja</div>
           {columns.map((col) => (
-            <div key={col.key} style={cellStyle(STAT_W)}>
+            <div key={col.key} style={colCellStyle(col)}>
               {col.label}
             </div>
           ))}
@@ -96,11 +105,11 @@ export async function renderStatsImage(
         {rows.map((row) => (
           <div key={row.rank} style={{ display: 'flex', borderBottom: '1px solid #e5e7eb' }}>
             <div style={{ ...cellStyle(RANK_W), color: '#6b7280' }}>{row.rank}</div>
-            <div style={{ ...cellStyle(NAME_W, 'flex-start'), paddingLeft: 8, fontWeight: 600 }}>{row.name}</div>
+            <div style={{ ...cellStyle(NAME_W, 'flex-start'), fontWeight: 600 }}>{row.name}</div>
             {columns.map((col) => {
               const cell = row.cells[col.key]
               return (
-                <div key={col.key} style={{ ...cellStyle(STAT_W), backgroundColor: cellBg(col, cell) }}>
+                <div key={col.key} style={{ ...colCellStyle(col), backgroundColor: cellBg(col, cell) }}>
                   {cell?.display ?? '–'}
                 </div>
               )
