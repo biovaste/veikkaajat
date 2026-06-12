@@ -4,7 +4,7 @@ import { getCountry } from '../countries'
 import { isWildcard, wildcardCountry } from '../players'
 import { calculatePoints } from '../scoring/engine'
 import { assignColors } from '../colors'
-import { fetchDayOdds } from '../therundown/client'
+import { fetchDayOdds, lookupOdds } from '../therundown/client'
 
 const GROUP_CHAT_ID = process.env.TELEGRAM_GROUP_CHAT_ID!
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? ''
@@ -601,8 +601,7 @@ export async function sendOddsReport(chatId?: number | string): Promise<void> {
   function getMatchOdds(m: NonNullable<typeof matches>[0]) {
     const dayMap = oddsCache.get(m.kickoff_at.slice(0, 10))
     if (!dayMap) return null
-    const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim()
-    return dayMap.get(`${norm(m.home_team)}|${norm(m.away_team)}`) ?? null
+    return lookupOdds(dayMap, m.home_team, m.away_team)
   }
 
   // All predictions on finished matches

@@ -24,8 +24,20 @@ function isSentinel(v: number): boolean {
   return Math.abs(v) < 0.01
 }
 
+// TheRundown → football-data.org name aliases
+const NAME_ALIASES: Record<string, string> = {
+  'czechia': 'czech republic',
+  'usa': 'united states',
+  'republic of ireland': 'ireland',
+  'ivory coast': "cote d'ivoire",
+  "cote d'ivoire": 'ivory coast', // in case fd.org differs
+  'dr congo': 'congo dr',
+  'cape verde islands': 'cape verde',
+}
+
 function normalizeName(name: string): string {
-  return name.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim()
+  const n = name.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim()
+  return NAME_ALIASES[n] ?? n
 }
 
 // Returns odds keyed by "homeTeam|awayTeam" using normalized names

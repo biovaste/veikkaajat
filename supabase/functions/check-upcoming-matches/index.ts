@@ -22,8 +22,17 @@ function americanToDecimal(a: number): number {
   return a > 0 ? a / 100 + 1 : 100 / Math.abs(a) + 1
 }
 
+const NAME_ALIASES: Record<string, string> = {
+  'czechia': 'czech republic',
+  'usa': 'united states',
+  'republic of ireland': 'ireland',
+  'dr congo': 'congo dr',
+  'cape verde islands': 'cape verde',
+}
+
 function normalizeName(s: string): string {
-  return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim()
+  const n = s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim()
+  return NAME_ALIASES[n] ?? n
 }
 
 async function fetchDayOdds(dateStr: string): Promise<Map<string, MatchOdds>> {
