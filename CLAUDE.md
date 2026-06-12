@@ -11,7 +11,7 @@ World Cup 2026 score prediction app for a small group of friends (<20 players).
 | Hosting | Vercel (free tier) |
 | Scheduled polling | Supabase Edge Function + pg_cron |
 | Match data | football-data.org v4 API (free tier) |
-| xG data | api-football.com v3 (free tier, 100 req/day) |
+| xG data + fast results | Flashscore via RapidAPI flashscore4 (HARD 500 req/month) |
 | Notifications | Telegram Bot API |
 
 UI language: Finnish. Layout: mobile-first. No open signup — admin invites players by email.
@@ -24,7 +24,7 @@ NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=        # server-side only, never in client code
 FOOTBALL_DATA_API_KEY=
-API_FOOTBALL_KEY=                 # api-sports.io key for xG data
+RAPIDAPI_KEY=                     # flashscore4 on RapidAPI — xG + fast results (500 req/month hard limit!)
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_GROUP_CHAT_ID=
 NEXT_PUBLIC_APP_URL=
@@ -34,7 +34,7 @@ TELEGRAM_WEBHOOK_SECRET=          # random string — set in both Vercel and whe
 **Supabase Edge Function secrets** (set via `supabase secrets set`):
 ```
 FOOTBALL_DATA_API_KEY=
-API_FOOTBALL_KEY=
+RAPIDAPI_KEY=
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_GROUP_CHAT_ID=
 NEXT_PUBLIC_APP_URL=
@@ -64,7 +64,8 @@ Special bet scoring: `app/api/admin/score-categories/route.ts`.
 - **football-data.org rate limit**: 10 req/min. Group stage seed is one bulk call. The edge function polls one match at a time with a 7s sleep between calls.
 - **football-data.org group format**: groups stored as `GROUP_A` (underscore, uppercase). `groupLabel()` in `lib/countries.ts` handles both `GROUP_A` and `Group A` formats → `Ryhmä A`.
 - **Scoring log**: `scoring_log` rows are deleted and re-inserted on every score/re-score to prevent point stacking.
-- **xG**: fetched from api-football.com after each match is scored (best-effort, non-fatal). `af_fixture_id` cached on match row to avoid re-lookup on re-scoring.
+- **xG + fast results (Flashscore)**: `lib/flashscore/client.ts` — RapidAPI flashscore4, **HARD 500 req/month**. Every call is logged to `fs_requests` and refused past 450/month (budget guard in both the TS client and the Deno edge function). `matches.fs_match_id` pre-mapped for all 72 group matches; knockouts auto-resolved from the fixtures feed (throttled to 1 call/6 h). xG fetched once at scoring (attempts capped at 3 via `fs_xg_attempts`, cron backfills). `/haetulos` falls back to Flashscore's results feed (throttled to 1 call/3 min) when football-data.org hasn't flipped FINISHED yet — manual path only; the cron stays football-data.org-canonical. WC ids: template `lvUBR5F8`, season `185`.
+- **api-football (legacy)**: free plan doesn't cover season 2026 — client kept in `lib/api-football/` but unused; `af_fixture_id` column dormant.
 - **Leaderboard page**: uses `force-dynamic` (no ISR) because it reads cookie-based auth. Predictions fetched via service role to get all players' data for Yllätys% and Tas% stats.
 - **Chart colors**: players pick a color from a 20-color palette in /settings. First-come-first-serve enforced by a partial unique index on `profiles.chart_color`. Auto-assigned from remaining pool for players without a pick. Logic in `lib/colors.ts`.
 - **Types**: Supabase client uses untyped `any` generics for now. Run `supabase gen types typescript --project-id <ref> > types/database.ts` after `supabase login` to get proper types.
@@ -87,7 +88,8 @@ All tables are in `supabase/migrations/`. Migrations 0001–0011 must be applied
 - `profiles.chart_color` — hex string chosen by player in /settings; NULL = auto-assigned
 - `profiles.clan` — 'Beeläiset' | 'Ceeläiset' | 'Independents' | NULL; chosen by player in /settings
 - `matches.reminder_sent`, `matches.kickoff_msg_sent` — prevent double Telegram messages
-- `matches.af_fixture_id`, `matches.home_xg`, `matches.away_xg` — xG data from api-football.com
+- `matches.home_xg`, `matches.away_xg` — xG data; `matches.fs_match_id`, `matches.fs_xg_attempts` — Flashscore id + fetch attempt cap (migration 0013; `af_fixture_id` is legacy/dormant)
+- `fs_requests` table — log of every Flashscore API call, enforces the 500/month hard limit
 
 **To mark yourself as admin** (run once in Supabase SQL editor after first login):
 ```sql
@@ -138,7 +140,9 @@ lib/
     client.ts             # createBrowserClient (client components)
     server.ts             # createServerClient + createServiceRoleClient (server)
   football-data/client.ts # fetchMatches(), fetchMatch()
-  api-football/client.ts  # findAfFixtureId(), fetchFixtureXg() — xG from api-sports.io
+  flashscore/client.ts    # fetchFsResults(), fetchFsResultsThrottled(), fetchFsXg()
+                          # budget-guarded via fs_requests (500/month hard limit)
+  api-football/client.ts  # LEGACY (free plan lacks season 2026) — unused
   telegram/
     bot.ts                # sendMessage(), sendMessageWithMarkup(), answerCallbackQuery(),
                           # sendPhoto(), sendPhotoBuffer(), sendPhotoBytes(), getQuickChartUrl()
@@ -188,6 +192,7 @@ supabase/
     0010_chart_color.sql          # chart_color on profiles + partial unique index
     0011_clan.sql                 # clan on profiles (CHECK constraint, 3 allowed values)
     0012_chat.sql                 # chat_messages table + RLS (read all, insert/delete own)
+    0013_flashscore.sql           # fs_match_id + fs_xg_attempts on matches; fs_requests budget log
   functions/
     poll-match-results/index.ts      # Deno: polls football-data.org, scores, fetches xG, sends result message
     check-upcoming-matches/index.ts  # Deno: sends reminder DMs + predictions-reveal group message
@@ -242,17 +247,20 @@ Leader column tinted yellow, own column tinted blue.
 
 Competition code: `WC`. Auth header: `X-Auth-Token`.
 
-## api-football.com (xG)
+## Flashscore via RapidAPI (xG + fast results)
 
-Base URL: `https://v3.football.api-sports.io`. Auth header: `x-apisports-key`.
-World Cup league ID: **1**, season: **2026**.
+Base URL: `https://flashscore4.p.rapidapi.com/api/flashscore/v2`.
+Headers: `x-rapidapi-host: flashscore4.p.rapidapi.com`, `x-rapidapi-key: $RAPIDAPI_KEY`.
+WC 2026: `tournament_template_id=lvUBR5F8`, `season_id=185`.
+**HARD LIMIT 500 requests/month** — every call logged to `fs_requests`, clients refuse past 450.
 
 | Purpose | Endpoint | When called |
 |---|---|---|
-| Find fixture ID | `GET /fixtures?league=1&season=2026&date=YYYY-MM-DD` | On first score of a match |
-| Fetch xG | `GET /fixtures/statistics?fixture={af_fixture_id}` | On score (cached after first fetch) |
+| Finished matches + scores | `GET /tournaments/results?...&page=1` | /haetulos fallback when FD lags (throttle: 1/3 min) |
+| xG (in "Expected goals (xG)" stat row) | `GET /matches/match/stats?match_id={fs_match_id}` | Once per match at scoring; ≤3 attempts via cron backfill |
+| Resolve knockout match ids | `GET /tournaments/fixtures?...&page=1` | Only when unmapped matches exist (throttle: 1/6 h) |
 
-Free tier: 100 req/day — sufficient (1 lookup + 1 stats call per match, ~64 matches total).
+Estimated tournament spend: ~150–250 requests/month. Check usage: `select count(*) from fs_requests where called_at >= date_trunc('month', now());`
 
 ## Telegram Bot
 
@@ -268,7 +276,7 @@ Bot: `@veikkaajat_apumarko_bot`
 - `/stats` — full stats board image (same columns as /leaderboard: Pts, KA, Tark, Mrk%, Nol%, L-KA, J-KA, Tas%, Yllätys%, Jht, xG-Pts, Bonus) rendered with next/og; each stat cell color-coded green (best) → red (worst); after the betting deadline also Mestari + Maalikuningas pick columns (uncolored text); caption has legend + link; falls back to text summary on error
 - `/luokkasota` — clan rankings: total + average pts per clan, members listed under each
 - `/maaliporssi` — top 10 tournament scorers from football-data.org (player, Finnish country name, goals, assists)
-- `/haetulos` — available to all group members; immediately polls football-data.org for any match that kicked off 85+ min ago and isn't scored yet, scores it, and sends the result message
+- `/haetulos` — available to all group members; immediately polls football-data.org for any match that kicked off 85+ min ago and isn't scored yet, scores it, and sends the result message. If FD hasn't flipped FINISHED yet (free-tier lag ~20–35 min), falls back to Flashscore's results feed (works right after the final whistle; throttled to 1 call/3 min)
 - `/help` — lists commands
 
 **Commands (DM):**
@@ -335,11 +343,11 @@ npm test           # vitest unit tests
 - Special bets summary shown on `/my-predictions`: champion, scorer, group picks with flags, always visible; shows "muokattavissa" tag while betting is still open; correct answers and points revealed after deadline
 
 ### ✅ Phase 5 — Automated Polling
-- `poll-match-results` edge function: runs every 10 min, polls football-data.org, scores predictions, fetches xG, sends Telegram result message
-- NOTE: football-data.org free tier marks matches FINISHED ~20–35 min after full time (upstream lag, can't be fixed app-side). api-football free plan does NOT cover season 2026 → xG is currently inoperative (returns 200 + `errors.plan` body, treated as "no data"); revisit if upgraded to a paid plan
+- `poll-match-results` edge function: runs every 10 min, polls football-data.org, scores predictions, fetches xG from Flashscore, sends Telegram result message; also backfills missing xG and resolves knockout fs_match_ids
+- NOTE: football-data.org free tier marks matches FINISHED ~20–35 min after full time (upstream lag) — the cron stays FD-canonical; only manual /haetulos uses the Flashscore fallback. api-football free plan does NOT cover season 2026 (replaced by Flashscore 2026-06-12)
 - `check-upcoming-matches` edge function: runs every 5 min, sends reminder DMs and kickoff messages
 - pg_cron jobs registered in Supabase — canonical SQL in `supabase/cron.sql` (substitute project ref + anon key!); verify with `cron.job_run_details` and `net._http_response` after changes
-- xG fetched from api-football.com and stored on match row (`af_fixture_id` cached)
+- xG fetched from Flashscore and stored on match row (`fs_match_id` pre-mapped/cached)
 
 ### ✅ Phase 5c — Clan War
 - `profiles.clan` column (migration 0011): 'Beeläiset' | 'Ceeläiset' | 'Independents' | NULL

@@ -29,7 +29,14 @@
       "WebFetch(domain:quickchart.io)",
       "PowerShell(npx tsc --noEmit)",
       "PowerShell(if \\(Test-Path \"$env:APPDATA\\\\supabase\\\\access-token\"\\) { Write-Output \"token file exists\" } else { Write-Output \"no token file\"; Get-ChildItem \"$env:APPDATA\\\\supabase\" -ErrorAction SilentlyContinue | Select-Object Name })",
-      "Bash(node verify-cron.mjs)"
+      "Bash(node verify-cron.mjs)",
+      "PowerShell(\\(Get-Content supabase\\\\cron.sql -Raw\\) -replace \"body := '\\\\{\\\\}'::jsonb\\\\r?\\\\n  \\\\\\)\\\\r?\\\\n  \\\\$\\\\$\\\\r?\\\\n\\\\\\);\\\\r?\\\\n\\\\r?\\\\nselect cron.schedule\\\\\\(\\\\r?\\\\n  'check-upcoming-matches'\", \"body := '{}'::jsonb,`n    timeout_milliseconds := 120000  -- polls one match per 7 s; needs headroom`n  \\)`n  `$`$`n\\);`n`nselect cron.schedule\\(`n  'check-upcoming-matches'\" | Set-Content supabase\\\\cron.sql -Encoding utf8 -NoNewline)",
+      "mcp__Claude_Preview__preview_start",
+      "PowerShell(Get-Content .login-link.tmp -TotalCount 1 | ForEach-Object { $_.Substring\\(0, 60\\) + '...' })",
+      "WebFetch(domain:docs.sportsapipro.com)",
+      "WebFetch(domain:footballdata.io)",
+      "WebSearch",
+      "WebFetch(domain:www.thestatsapi.com)"
     ]
   }
 }

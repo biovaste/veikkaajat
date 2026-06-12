@@ -2,7 +2,7 @@ import { createServiceRoleClient } from '@/lib/supabase/server'
 import { fetchMatch } from '@/lib/football-data/client'
 import { calculatePoints } from '@/lib/scoring/engine'
 import { sendResultMessage, type LeaderboardRow, type PlayerInfo } from '@/lib/telegram/notify'
-import { findAfFixtureId, fetchFixtureXg } from '@/lib/api-football/client'
+import { fetchFsResultsThrottled, fetchFsXg, type FsResultRow } from '@/lib/flashscore/client'
 
 export interface PollResult {
   checked: number   // matches inspected
@@ -13,6 +13,10 @@ export interface PollResult {
 /**
  * Looks for unscored matches that kicked off at least 85 minutes ago,
  * fetches their status from football-data.org, and scores any that are FINISHED.
+ * football-data.org's free tier flips FINISHED ~20-35 min after full time, so
+ * for matches well past kickoff a Flashscore fallback (near-realtime, budget-
+ * guarded) supplies the result — that makes manual /haetulos work right after
+ * the final whistle.
  * Safe to call multiple times — already-scored matches are skipped by the DB query.
  */
 export async function pollAndScoreFinishedMatches(): Promise<PollResult> {
@@ -24,7 +28,7 @@ export async function pollAndScoreFinishedMatches(): Promise<PollResult> {
 
   const { data: candidates } = await admin
     .from('matches')
-    .select('id, external_id, home_team, away_team, kickoff_at, af_fixture_id')
+    .select('id, external_id, home_team, away_team, kickoff_at, fs_match_id, fs_xg_attempts')
     .is('home_score', null)
     .eq('status', 'SCHEDULED')
     .lte('kickoff_at', cutoffEarly)
@@ -35,25 +39,38 @@ export async function pollAndScoreFinishedMatches(): Promise<PollResult> {
 
   const result: PollResult = { checked: candidates.length, scored: 0, names: [] }
 
+  // Flashscore results feed, fetched lazily at most once per run (throttled)
+  let fsResults: FsResultRow[] | null | undefined
+
   for (const match of candidates) {
     const fd = await fetchMatch(match.external_id).catch(() => null)
-    if (!fd || fd.status !== 'FINISHED') continue
 
-    const home_score = fd.score.fullTime.home!
-    const away_score = fd.score.fullTime.away!
+    let home_score: number | null = null
+    let away_score: number | null = null
 
-    // xG (best-effort)
+    if (fd?.status === 'FINISHED' && fd.score.fullTime.home !== null && fd.score.fullTime.away !== null) {
+      home_score = fd.score.fullTime.home
+      away_score = fd.score.fullTime.away
+    } else if (match.fs_match_id && Date.now() - +new Date(match.kickoff_at) >= 105 * 60 * 1000) {
+      // football-data.org hasn't confirmed yet — check Flashscore's results feed
+      if (fsResults === undefined) fsResults = await fetchFsResultsThrottled(admin).catch(() => null)
+      const fsRow = fsResults?.find(r => r.match_id === match.fs_match_id)
+      if (fsRow?.scores && typeof fsRow.scores.home === 'number' && typeof fsRow.scores.away === 'number') {
+        home_score = fsRow.scores.home
+        away_score = fsRow.scores.away
+      }
+    }
+
+    if (home_score === null || away_score === null) continue
+
+    // xG from Flashscore (best-effort, attempts capped — backfill retries via cron)
     let xgUpdate: Record<string, unknown> = {}
-    if (process.env.API_FOOTBALL_KEY) {
+    if (match.fs_match_id) {
       try {
-        let afId = match.af_fixture_id
-        if (!afId) afId = await findAfFixtureId(match.kickoff_at, match.home_team, match.away_team)
-        if (afId) {
-          const xg = await fetchFixtureXg(afId)
-          if (xg) xgUpdate = { af_fixture_id: afId, home_xg: xg.home_xg, away_xg: xg.away_xg }
-          else if (afId !== match.af_fixture_id) xgUpdate = { af_fixture_id: afId }
-        }
+        const xg = await fetchFsXg(admin, match.fs_match_id)
+        if (xg) xgUpdate = { ...xg }
       } catch { /* non-fatal */ }
+      xgUpdate = { ...xgUpdate, fs_xg_attempts: (match.fs_xg_attempts ?? 0) + 1 }
     }
 
     // Update match

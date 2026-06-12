@@ -4,7 +4,8 @@
 // full time — that upstream lag, not this schedule, dominates result latency.
 // - Finds matches that should be finished and fetches results from football-data.org
 // - Scores all predictions, updates scoring_log (replacing previous entries to avoid stacking)
-// - Fetches xG from API-Football and stores it on the match row
+// - Fetches xG from Flashscore (RapidAPI, budget-guarded via fs_requests) and stores it
+// - Backfills missing xG and resolves knockout fs_match_ids as they appear
 // - Sends Telegram result message with leaderboard and position changes
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
@@ -14,7 +15,7 @@ const SERVICE_ROLE_KEY    = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const FD_API_KEY          = Deno.env.get('FOOTBALL_DATA_API_KEY')!
 const BOT_TOKEN           = Deno.env.get('TELEGRAM_BOT_TOKEN')!
 const GROUP_CHAT_ID       = Deno.env.get('TELEGRAM_GROUP_CHAT_ID')!
-const AF_API_KEY          = Deno.env.get('API_FOOTBALL_KEY') ?? ''  // optional
+const RAPIDAPI_KEY        = Deno.env.get('RAPIDAPI_KEY') ?? ''  // optional
 
 const TG = `https://api.telegram.org/bot${BOT_TOKEN}`
 
@@ -43,54 +44,71 @@ function calcPoints(
   return { total: resultPts + homePts + awayPts, breakdown: { result: resultPts, home_goals: homePts, away_goals: awayPts } }
 }
 
-// ─── xG from API-Football ────────────────────────────────────────────────────
+// ─── Flashscore (RapidAPI) — xG + match id resolution ────────────────────────
+// HARD LIMIT 500 requests/month: every call is logged to fs_requests and
+// fsFetch refuses to call once FS_BUDGET is reached.
 
-const AF_BASE       = 'https://v3.football.api-sports.io'
-const WC_LEAGUE_ID  = 1
-const WC_SEASON     = 2026
+const FS_BASE   = 'https://flashscore4.p.rapidapi.com/api/flashscore/v2'
+const FS_TT     = 'lvUBR5F8' // World Cup tournament_template_id
+const FS_SEASON = '185'      // 2026 season_id
+const FS_BUDGET = 450
 
-function normalize(s: string) { return s.toLowerCase().replace(/[^a-z]/g, '') }
+// deno-lint-ignore no-explicit-any
+type Db = any
 
-async function findAfFixtureId(kickoffAt: string, homeTeam: string, awayTeam: string): Promise<number | null> {
-  if (!AF_API_KEY) return null
-  const date = kickoffAt.slice(0, 10)
-  const res = await fetch(`${AF_BASE}/fixtures?league=${WC_LEAGUE_ID}&season=${WC_SEASON}&date=${date}`, {
-    headers: { 'x-apisports-key': AF_API_KEY },
-  })
-  if (!res.ok) return null
-  const data = await res.json()
-  const homeN = normalize(homeTeam)
-  const awayN = normalize(awayTeam)
-  for (const f of data.response ?? []) {
-    const fH = normalize(f.teams.home.name)
-    const fA = normalize(f.teams.away.name)
-    if ((fH.includes(homeN) || homeN.includes(fH)) && (fA.includes(awayN) || awayN.includes(fA))) {
-      return f.fixture.id as number
-    }
+async function fsFetch(db: Db, endpoint: string): Promise<unknown | null> {
+  if (!RAPIDAPI_KEY) return null
+  const monthStart = new Date()
+  monthStart.setUTCDate(1)
+  monthStart.setUTCHours(0, 0, 0, 0)
+  const { count } = await db
+    .from('fs_requests')
+    .select('*', { count: 'exact', head: true })
+    .gte('called_at', monthStart.toISOString())
+  if ((count ?? 0) >= FS_BUDGET) {
+    console.warn(`[fs] monthly budget reached (${count}) — skipping ${endpoint}`)
+    return null
   }
-  return null
+  await db.from('fs_requests').insert({ endpoint })
+  const res = await fetch(`${FS_BASE}${endpoint}`, {
+    headers: { 'x-rapidapi-host': 'flashscore4.p.rapidapi.com', 'x-rapidapi-key': RAPIDAPI_KEY },
+  })
+  if (!res.ok) {
+    console.error(`[fs] ${endpoint} → ${res.status}`)
+    return null
+  }
+  return res.json()
 }
 
-async function fetchXg(afId: number): Promise<{ home_xg: number; away_xg: number } | null> {
-  if (!AF_API_KEY) return null
-  const res = await fetch(`${AF_BASE}/fixtures/statistics?fixture=${afId}`, {
-    headers: { 'x-apisports-key': AF_API_KEY },
-  })
-  if (!res.ok) return null
-  const data = await res.json()
-  if (!data.response || data.response.length < 2) return null
-  const getXg = (team: { statistics: { type: string; value: string | null }[] }) => {
-    const stat = team.statistics.find((s: { type: string }) =>
-      s.type === 'Expected Goals' || s.type === 'expected_goals'
-    )
-    if (!stat?.value) return null
-    const n = parseFloat(String(stat.value))
-    return isNaN(n) ? null : n
+async function fetchFsXg(db: Db, fsMatchId: string): Promise<{ home_xg: number; away_xg: number } | null> {
+  const data = await fsFetch(db, `/matches/match/stats?match_id=${fsMatchId}`) as
+    { match?: { name: string; home_team: unknown; away_team: unknown }[] } | null
+  const xg = data?.match?.find(s => s.name === 'Expected goals (xG)')
+  if (!xg || typeof xg.home_team !== 'number' || typeof xg.away_team !== 'number') return null
+  return { home_xg: xg.home_team, away_xg: xg.away_team }
+}
+
+function squashName(s: string) {
+  return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z]/g, '')
+}
+
+/** Resolve fs_match_id for matches missing one (knockouts) from the fixtures feed. */
+async function resolveFsIds(db: Db, matches: { id: number; home_team: string; away_team: string; kickoff_at: string }[]) {
+  const fixtures = await fsFetch(db, `/tournaments/fixtures?tournament_template_id=${FS_TT}&season_id=${FS_SEASON}&page=1`) as
+    { match_id: string; timestamp: number; home_team: { name: string }; away_team: { name: string } }[] | null
+  if (!Array.isArray(fixtures)) return
+  const SQUASH_ALIASES: Record<string, string> = { drcongo: 'congodr', czechrepublic: 'czechia', usa: 'unitedstates', bosniaherzegovina: 'bosniaherzegovina' }
+  const sq = (s: string) => { const v = squashName(s); return SQUASH_ALIASES[v] ?? v }
+  for (const m of matches) {
+    const ts = Math.floor(+new Date(m.kickoff_at) / 1000)
+    const hit = fixtures.find(f => {
+      if (f.timestamp !== ts) return false
+      const fh = sq(f.home_team?.name ?? ''), fa = sq(f.away_team?.name ?? '')
+      const oh = sq(m.home_team), oa = sq(m.away_team)
+      return (fh.includes(oh) || oh.includes(fh)) && (fa.includes(oa) || oa.includes(fa))
+    })
+    if (hit) await db.from('matches').update({ fs_match_id: hit.match_id }).eq('id', m.id)
   }
-  const home_xg = getXg(data.response[0])
-  const away_xg = getXg(data.response[1])
-  if (home_xg === null || away_xg === null) return null
-  return { home_xg, away_xg }
 }
 
 // ─── Telegram result message ──────────────────────────────────────────────────
@@ -166,20 +184,14 @@ Deno.serve(async (_req) => {
 
   const { data: matches } = await db
     .from('matches')
-    .select('id, external_id, home_team, away_team, kickoff_at, af_fixture_id')
+    .select('id, external_id, home_team, away_team, kickoff_at, fs_match_id, fs_xg_attempts')
     .in('status', ['SCHEDULED', 'TIMED', 'IN_PLAY', 'PAUSED'])
     .lt('kickoff_at', pollBefore.toISOString())
     .limit(10)
 
-  if (!matches || matches.length === 0) {
-    return new Response(JSON.stringify({ ok: true, polled: 0 }), {
-      headers: { 'Content-Type': 'application/json' },
-    })
-  }
-
   let scored = 0
 
-  for (const match of matches) {
+  for (const match of matches ?? []) {
     try {
       const fdRes = await fetch(
         `https://api.football-data.org/v4/matches/${match.external_id}`,
@@ -203,20 +215,16 @@ Deno.serve(async (_req) => {
           continue
         }
 
-        // Fetch xG from API-Football (best-effort, non-fatal)
+        // Fetch xG from Flashscore (best-effort, non-fatal; backfill pass retries)
         let xgUpdate: Record<string, number> = {}
-        if (AF_API_KEY) {
+        if (match.fs_match_id) {
           try {
-            let afId: number | null = match.af_fixture_id ?? null
-            if (!afId) afId = await findAfFixtureId(match.kickoff_at, match.home_team, match.away_team)
-            if (afId) {
-              const xg = await fetchXg(afId)
-              if (xg) xgUpdate = { af_fixture_id: afId, ...xg }
-              else if (afId !== match.af_fixture_id) xgUpdate = { af_fixture_id: afId }
-            }
+            const xg = await fetchFsXg(db, match.fs_match_id)
+            if (xg) xgUpdate = { ...xg }
           } catch (xgErr) {
             console.warn('[xg] non-fatal:', xgErr)
           }
+          xgUpdate = { ...xgUpdate, fs_xg_attempts: (match.fs_xg_attempts ?? 0) + 1 }
         }
 
         // Update match result + optional xG
@@ -273,7 +281,48 @@ Deno.serve(async (_req) => {
     await sleep(7000) // respect football-data.org 10 req/min limit
   }
 
-  return new Response(JSON.stringify({ ok: true, polled: matches.length, scored }), {
+  // ── Flashscore maintenance (cheap, budget-guarded) ──────────────────────────
+  if (RAPIDAPI_KEY) {
+    try {
+      // Retry missing xG for recently finished matches (max 3 attempts each)
+      const { data: missingXg } = await db
+        .from('matches')
+        .select('id, fs_match_id, fs_xg_attempts')
+        .eq('status', 'FINISHED')
+        .is('home_xg', null)
+        .not('fs_match_id', 'is', null)
+        .lt('fs_xg_attempts', 3)
+        .gte('result_confirmed_at', new Date(Date.now() - 24 * 3600 * 1000).toISOString())
+
+      for (const m of missingXg ?? []) {
+        const xg = await fetchFsXg(db, m.fs_match_id)
+        await db.from('matches').update({ ...(xg ?? {}), fs_xg_attempts: (m.fs_xg_attempts ?? 0) + 1 }).eq('id', m.id)
+      }
+
+      // Resolve fs_match_id for newly seeded matches (knockouts) starting within 7 days.
+      // Throttled to one fixtures call per 6 h so unresolvable placeholders
+      // (TBD team names) can't drain the budget.
+      const { data: unresolved } = await db
+        .from('matches')
+        .select('id, home_team, away_team, kickoff_at')
+        .is('fs_match_id', null)
+        .gt('kickoff_at', new Date().toISOString())
+        .lt('kickoff_at', new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString())
+
+      if (unresolved && unresolved.length > 0) {
+        const { count: recentFixtureCalls } = await db
+          .from('fs_requests')
+          .select('*', { count: 'exact', head: true })
+          .gte('called_at', new Date(Date.now() - 6 * 3600 * 1000).toISOString())
+          .like('endpoint', '%tournaments/fixtures%')
+        if ((recentFixtureCalls ?? 0) === 0) await resolveFsIds(db, unresolved)
+      }
+    } catch (fsErr) {
+      console.warn('[fs] maintenance non-fatal:', fsErr)
+    }
+  }
+
+  return new Response(JSON.stringify({ ok: true, polled: (matches ?? []).length, scored }), {
     headers: { 'Content-Type': 'application/json' },
   })
 })
