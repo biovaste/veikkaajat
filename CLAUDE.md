@@ -238,7 +238,7 @@ Leader column tinted yellow, own column tinted blue.
 |---|---|---|
 | Seed group stage | `GET /v4/competitions/WC/matches?stage=GROUP_STAGE` | Admin: seed page |
 | Seed knockout rounds | `GET /v4/competitions/WC/matches?stage=ROUND_OF_16` etc. | Admin: per stage |
-| Poll result | `GET /v4/matches/{external_id}` | Edge function every 30 min |
+| Poll result | `GET /v4/matches/{external_id}` | Edge function every 10 min |
 
 Competition code: `WC`. Auth header: `X-Auth-Token`.
 
@@ -335,7 +335,8 @@ npm test           # vitest unit tests
 - Special bets summary shown on `/my-predictions`: champion, scorer, group picks with flags, always visible; shows "muokattavissa" tag while betting is still open; correct answers and points revealed after deadline
 
 ### ✅ Phase 5 — Automated Polling
-- `poll-match-results` edge function: runs every 30 min, polls football-data.org, scores predictions, fetches xG, sends Telegram result message
+- `poll-match-results` edge function: runs every 10 min, polls football-data.org, scores predictions, fetches xG, sends Telegram result message
+- NOTE: football-data.org free tier marks matches FINISHED ~20–35 min after full time (upstream lag, can't be fixed app-side). api-football free plan does NOT cover season 2026 → xG is currently inoperative (returns 200 + `errors.plan` body, treated as "no data"); revisit if upgraded to a paid plan
 - `check-upcoming-matches` edge function: runs every 5 min, sends reminder DMs and kickoff messages
 - pg_cron jobs registered in Supabase — canonical SQL in `supabase/cron.sql` (substitute project ref + anon key!); verify with `cron.job_run_details` and `net._http_response` after changes
 - xG fetched from api-football.com and stored on match row (`af_fixture_id` cached)

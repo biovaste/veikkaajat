@@ -3,7 +3,7 @@ import { sendMessage, sendMessageWithMarkup, sendPhoto, sendPhotoBuffer, sendPho
 import { getCountry } from '../countries'
 import { isWildcard, wildcardCountry } from '../players'
 import { calculatePoints } from '../scoring/engine'
-import { CHART_COLOR_HEXES } from '../colors'
+import { assignColors } from '../colors'
 
 const GROUP_CHAT_ID = process.env.TELEGRAM_GROUP_CHAT_ID!
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? ''
@@ -391,50 +391,58 @@ export async function sendChartImage(chatId?: number | string): Promise<void> {
   const target = String(chatId ?? GROUP_CHAT_ID)
   const admin = createServiceRoleClient()
 
-  const { data: log } = await admin
-    .from('scoring_log')
-    .select('user_id, points, match_id, matches(kickoff_at), profiles(display_name)')
-    .order('match_id', { ascending: true })
+  const [{ data: profiles }, { data: log }, { data: catBets }] = await Promise.all([
+    admin.from('profiles').select('id, display_name, chart_color').order('display_name'),
+    admin.from('scoring_log').select('user_id, points, match_id').order('match_id', { ascending: true }),
+    admin.from('category_bets').select('user_id, points'),
+  ])
 
   if (!log || log.length === 0) {
     await sendMessage(target, '📈 Ei vielä pisteitä piirrettäväksi.')
     return
   }
 
-  // Build cumulative chart data (same logic as leaderboard page)
-  const playerNames = new Set<string>()
-  const byMatch: Record<number, { name: string; points: number }[]> = {}
-
-  for (const row of log ?? []) {
-    const name = (Array.isArray(row.profiles) ? row.profiles[0] : row.profiles)?.display_name
-    if (!name) continue
-    playerNames.add(name)
-    if (!byMatch[row.match_id]) byMatch[row.match_id] = []
-    byMatch[row.match_id].push({ name, points: row.points })
+  // Sort players by total points (match + bonus) descending — the same order
+  // as /leaderboard, so assignColors() resolves identically and the chart
+  // colors match the leaderboard page
+  const totals: Record<string, number> = {}
+  for (const p of profiles ?? []) totals[p.id] = 0
+  for (const row of log) totals[row.user_id] = (totals[row.user_id] ?? 0) + row.points
+  for (const row of catBets ?? []) {
+    if (row.points !== null) totals[row.user_id] = (totals[row.user_id] ?? 0) + row.points
   }
 
-  const players = [...playerNames]
-  const running: Record<string, number> = Object.fromEntries(players.map((n) => [n, 0]))
+  const sorted = [...(profiles ?? [])].sort((a, b) => (totals[b.id] ?? 0) - (totals[a.id] ?? 0))
+  const colorMap = assignColors(sorted.map((p) => ({ id: p.id, chart_color: p.chart_color ?? null })))
+
+  // Build cumulative chart data (same logic as leaderboard page)
+  const byMatch: Record<number, { user_id: string; points: number }[]> = {}
+  for (const row of log) {
+    if (!byMatch[row.match_id]) byMatch[row.match_id] = []
+    byMatch[row.match_id].push(row)
+  }
+
+  const running: Record<string, number> = Object.fromEntries(sorted.map((p) => [p.id, 0]))
   const labels: number[] = []
-  const datasets: Record<string, number[]>[] = players.map(() => ({ data: [] as number[] }))
+  const series: Record<string, number[]> = Object.fromEntries(sorted.map((p) => [p.id, []]))
 
   let idx = 1
   for (const matchId of Object.keys(byMatch).map(Number)) {
-    for (const { name, points } of byMatch[matchId]) {
-      running[name] = (running[name] ?? 0) + points
+    for (const { user_id, points } of byMatch[matchId]) {
+      running[user_id] = (running[user_id] ?? 0) + points
     }
     labels.push(idx++)
-    players.forEach((name, i) => datasets[i].data.push(running[name] ?? 0))
+    for (const p of sorted) series[p.id].push(running[p.id] ?? 0)
   }
 
   const chartConfig = {
     type: 'line',
     data: {
       labels,
-      datasets: players.map((name, i) => ({
-        label: name,
-        data: datasets[i].data,
-        borderColor: CHART_COLOR_HEXES[i % CHART_COLOR_HEXES.length],
+      datasets: sorted.map((p) => ({
+        label: p.display_name,
+        data: series[p.id],
+        borderColor: colorMap[p.id],
         backgroundColor: 'transparent',
         fill: false,
         tension: 0,

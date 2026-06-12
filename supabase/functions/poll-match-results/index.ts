@@ -1,5 +1,7 @@
 // Supabase Edge Function: poll-match-results
-// Runs every 30 minutes via pg_cron.
+// Runs every 10 minutes via pg_cron.
+// Note: football-data.org free tier flips status to FINISHED ~20-35 min after
+// full time — that upstream lag, not this schedule, dominates result latency.
 // - Finds matches that should be finished and fetches results from football-data.org
 // - Scores all predictions, updates scoring_log (replacing previous entries to avoid stacking)
 // - Fetches xG from API-Football and stores it on the match row

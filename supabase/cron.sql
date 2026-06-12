@@ -13,7 +13,7 @@
 
 select cron.schedule(
   'poll-match-results',
-  '*/30 * * * *',
+  '*/10 * * * *',
   $$
   select net.http_post(
     url := 'https://YOUR_PROJECT_REF.supabase.co/functions/v1/poll-match-results',
