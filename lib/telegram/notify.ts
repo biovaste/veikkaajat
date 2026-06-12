@@ -4,6 +4,7 @@ import { getCountry } from '../countries'
 import { isWildcard, wildcardCountry } from '../players'
 import { calculatePoints } from '../scoring/engine'
 import { assignColors } from '../colors'
+import { fetchDayOdds } from '../therundown/client'
 
 const GROUP_CHAT_ID = process.env.TELEGRAM_GROUP_CHAT_ID!
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? ''
@@ -568,6 +569,127 @@ export async function sendTopScorers(chatId?: number | string): Promise<void> {
   })
 
   await sendMessage(target, text.trim())
+}
+
+// ─── /odds command ───────────────────────────────────────────────────────────
+
+export async function sendOddsReport(chatId?: number | string): Promise<void> {
+  const target = String(chatId ?? GROUP_CHAT_ID)
+  const db = createServiceRoleClient()
+
+  // All finished matches
+  const { data: matches } = await db
+    .from('matches')
+    .select('id, home_team, away_team, kickoff_at, home_score, away_score')
+    .eq('status', 'FINISHED')
+    .order('kickoff_at', { ascending: true })
+
+  if (!matches?.length) {
+    await sendMessage(target, 'ℹ️ Ei vielä päättyneitä otteluita.')
+    return
+  }
+
+  // Fetch TheRundown odds grouped by UTC date (one request per day)
+  const oddsCache = new Map<string, Awaited<ReturnType<typeof fetchDayOdds>>>()
+  const uniqueDates = [...new Set(matches.map((m) => m.kickoff_at.slice(0, 10)))]
+  await Promise.all(
+    uniqueDates.map(async (d) => {
+      try { oddsCache.set(d, await fetchDayOdds(d)) } catch { /* skip */ }
+    }),
+  )
+
+  function getMatchOdds(m: NonNullable<typeof matches>[0]) {
+    const dayMap = oddsCache.get(m.kickoff_at.slice(0, 10))
+    if (!dayMap) return null
+    const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim()
+    return dayMap.get(`${norm(m.home_team)}|${norm(m.away_team)}`) ?? null
+  }
+
+  // All predictions on finished matches
+  const matchIds = matches.map((m) => m.id)
+  const { data: preds } = await db
+    .from('predictions')
+    .select('user_id, match_id, home_score_pred, away_score_pred, points')
+    .in('match_id', matchIds)
+
+  const { data: players } = await db
+    .from('profiles')
+    .select('id, display_name')
+    .order('display_name')
+
+  if (!preds?.length || !players?.length) {
+    await sendMessage(target, 'ℹ️ Ei riittävästi dataa.')
+    return
+  }
+
+  // Build match lookup
+  const matchById = Object.fromEntries(matches.map((m) => [m.id, m]))
+
+  // Per-player stats
+  type Stats = { sumOdds: number; roi: number; n: number }
+  const stats: Record<string, Stats> = {}
+  for (const p of players) stats[p.id] = { sumOdds: 0, roi: 0, n: 0 }
+
+  let matchesWithOdds = 0
+
+  for (const pred of preds) {
+    const match = matchById[pred.match_id]
+    if (!match) continue
+    const odds = getMatchOdds(match)
+    if (!odds) continue
+
+    // What outcome did the player predict?
+    const ph = pred.home_score_pred
+    const pa = pred.away_score_pred
+    const predictedOutcome = ph > pa ? 'home' : ph < pa ? 'away' : 'draw'
+    const predictedOdds =
+      predictedOutcome === 'home' ? odds.homeWin
+      : predictedOutcome === 'away' ? odds.awayWin
+      : odds.draw
+
+    // Was the prediction correct (3 pts = correct result)?
+    const correct = (pred.points ?? 0) >= 3
+
+    const st = stats[pred.user_id]
+    if (!st) continue
+    st.sumOdds += predictedOdds
+    // ROI: stake 1, return = odds if correct, 0 if not
+    st.roi += correct ? predictedOdds - 1 : -1
+    st.n++
+    matchesWithOdds++
+  }
+
+  // Sort by ROI descending
+  const rows = players
+    .map((p) => ({ name: p.display_name, ...stats[p.id] }))
+    .filter((r) => r.n > 0)
+    .sort((a, b) => b.roi / b.n - a.roi / a.n)
+
+  if (!rows.length) {
+    await sendMessage(target, 'ℹ️ Ei löydy veikkauksia otteluille joille on kertoimet.')
+    return
+  }
+
+  // Format table: Name | Avg odds | ROI%
+  const NL = 12, NO = 6, NR = 7
+  let table = `${padR('Pelaaja', NL)} ${padL('KA-k', NO)} ${padL('ROI', NR)}\n`
+  table += '─'.repeat(NL + NO + NR + 2) + '\n'
+  for (const r of rows) {
+    const avgOdds = (r.sumOdds / r.n).toFixed(2)
+    const roi = r.roi / r.n * 100
+    const roiStr = (roi >= 0 ? '+' : '') + roi.toFixed(1) + '%'
+    table += `${padR(truncate(r.name, NL), NL)} ${padL(avgOdds, NO)} ${padL(roiStr, NR)}\n`
+  }
+
+  const uniqueMatchDates = uniqueDates.length
+  const text =
+    `📈 <b>Kerroinanalyysi</b>\n\n` +
+    `<pre>${table}</pre>\n` +
+    `<i>KA-k = veikkauksen kerroin keskimäärin\n` +
+    `ROI = tuotto per veikkaus (1 yksikön panos)\n` +
+    `${matches.length} ottelua · ${uniqueMatchDates} päivää haettu</i>`
+
+  await sendMessage(target, text)
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

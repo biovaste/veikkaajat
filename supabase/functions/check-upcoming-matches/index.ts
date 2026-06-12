@@ -10,6 +10,54 @@ const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const BOT_TOKEN = Deno.env.get('TELEGRAM_BOT_TOKEN')!
 const GROUP_CHAT_ID = Deno.env.get('TELEGRAM_GROUP_CHAT_ID')!
 const APP_URL = Deno.env.get('NEXT_PUBLIC_APP_URL') ?? ''
+const RAPIDAPI_KEY = Deno.env.get('RAPIDAPI_KEY') ?? ''
+
+// ─── TheRundown odds ──────────────────────────────────────────────────────────
+
+const TR_AFFILIATE_PRIORITY = [19, 23, 6, 28, 4, 11, 22, 21, 2, 12, 14, 16, 27, 25, 26]
+
+interface MatchOdds { homeWin: number; draw: number; awayWin: number }
+
+function americanToDecimal(a: number): number {
+  return a > 0 ? a / 100 + 1 : 100 / Math.abs(a) + 1
+}
+
+function normalizeName(s: string): string {
+  return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim()
+}
+
+async function fetchDayOdds(dateStr: string): Promise<Map<string, MatchOdds>> {
+  const result = new Map<string, MatchOdds>()
+  if (!RAPIDAPI_KEY) return result
+  try {
+    const res = await fetch(
+      `https://therundown-therundown-v1.p.rapidapi.com/sports/18/events/${dateStr}`,
+      { headers: { 'x-rapidapi-host': 'therundown-therundown-v1.p.rapidapi.com', 'x-rapidapi-key': RAPIDAPI_KEY } },
+    )
+    if (!res.ok) return result
+    const data = await res.json()
+    for (const event of data.events ?? []) {
+      const away = event.teams?.[0]?.name as string
+      const home = event.teams?.[1]?.name as string
+      if (!away || !home || !event.lines) continue
+      for (const affId of TR_AFFILIATE_PRIORITY) {
+        const ml = event.lines[String(affId)]?.moneyline
+        if (!ml) continue
+        const { moneyline_home: mh, moneyline_away: ma, moneyline_draw: md } = ml
+        if (Math.abs(mh) < 0.01 || Math.abs(ma) < 0.01 || Math.abs(md) < 0.01) continue
+        result.set(`${normalizeName(home)}|${normalizeName(away)}`, {
+          homeWin: +americanToDecimal(mh).toFixed(2),
+          draw: +americanToDecimal(md).toFixed(2),
+          awayWin: +americanToDecimal(ma).toFixed(2),
+        })
+        break
+      }
+    }
+  } catch (e) {
+    console.error('[fetchDayOdds] error', e)
+  }
+  return result
+}
 
 const TG = `https://api.telegram.org/bot${BOT_TOKEN}`
 
@@ -179,6 +227,14 @@ Deno.serve(async (_req) => {
     .lte('kickoff_at', deadlinePassed.toISOString())
     .gte('kickoff_at', catchUpWindow.toISOString())
 
+  // Fetch odds once per date covering all today's kickoff matches
+  const oddsCache = new Map<string, Map<string, MatchOdds>>()
+  async function getOdds(kickoffAt: string): Promise<Map<string, MatchOdds>> {
+    const dateStr = kickoffAt.slice(0, 10)
+    if (!oddsCache.has(dateStr)) oddsCache.set(dateStr, await fetchDayOdds(dateStr))
+    return oddsCache.get(dateStr)!
+  }
+
   for (const match of kMatches ?? []) {
     // Fetch all predictions for this match with player names
     const { data: preds } = await db
@@ -200,8 +256,12 @@ Deno.serve(async (_req) => {
     })
 
     const channel = getFiChannel(match.home_team, match.away_team)
+    const dayOdds = await getOdds(match.kickoff_at)
+    const odds = dayOdds.get(`${normalizeName(match.home_team)}|${normalizeName(match.away_team)}`)
+
     let text = `🔔 <b>${match.home_team} – ${match.away_team}</b>\n`
     if (channel) text += `📺 ${channel}\n`
+    if (odds) text += `📊 Kertoimet: K ${odds.homeWin} · T ${odds.draw} · V ${odds.awayWin}\n`
     text += `\n<b>Veikkaukset:</b>\n`
     if (predLines.length) text += predLines.join('\n') + '\n'
     if (notPredicted.length) text += `\n<i>Ei veikannut: ${notPredicted.join(', ')}</i>`

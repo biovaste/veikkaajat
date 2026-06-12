@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { sendMessage, sendMessageWithMarkup, answerCallbackQuery } from '@/lib/telegram/bot'
-import { sendStatsTable, sendChartImage, sendClanWar, sendTopScorers } from '@/lib/telegram/notify'
+import { sendStatsTable, sendChartImage, sendClanWar, sendTopScorers, sendOddsReport } from '@/lib/telegram/notify'
 import { pollAndScoreFinishedMatches } from '@/lib/poll-and-score'
 import { createServiceRoleClient } from '@/lib/supabase/server'
 import { getCountry } from '@/lib/countries'
@@ -113,6 +113,11 @@ export async function POST(request: NextRequest) {
       console.error('[webhook /luokkasota]', err)
       await sendMessage(chatId, '⚠️ Luokkasota ei onnistu juuri nyt.').catch(console.error)
     })
+  } else if (text === '/odds' && isGroup) {
+    await sendOddsReport(chatId).catch(async (err) => {
+      console.error('[webhook /odds]', err)
+      await sendMessage(chatId, '⚠️ Kerroinanalyysi ei onnistu juuri nyt.').catch(console.error)
+    })
   } else if (text === '/chatid') {
     // Diagnostic: report this chat's id and whether it matches the configured group id
     const configured = process.env.TELEGRAM_GROUP_CHAT_ID ?? ''
@@ -131,7 +136,7 @@ export async function POST(request: NextRequest) {
     const dmNote = isDM ? '\n\n📩 <b>Omat komennot (yksityisviesti):</b>\n/veikkaukset — seuraavat 5 veikkaustasi' : ''
     await sendMessage(
       chatId,
-      '📋 <b>Komennot (ryhmässä):</b>\n/chart — pistekehityskaavio\n/stats — tilastotaulukko\n/luokkasota — klaanien pistetilanne\n/maaliporssi — turnauksen maalipörssi (top 10)\n/haetulos — hae tulos heti' +
+      '📋 <b>Komennot (ryhmässä):</b>\n/chart — pistekehityskaavio\n/stats — tilastotaulukko\n/odds — kerroinanalyysi (KA-kerroin & ROI)\n/luokkasota — klaanien pistetilanne\n/maaliporssi — turnauksen maalipörssi (top 10)\n/haetulos — hae tulos heti' +
       dmNote +
       '\n\nVeikkaa: ' + (process.env.NEXT_PUBLIC_APP_URL ?? ''),
     ).catch(console.error)
