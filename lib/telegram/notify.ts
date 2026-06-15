@@ -81,7 +81,7 @@ export async function sendResultMessage(
   const sorted = [...predictions].sort((a, b) => b.points - a.points)
 
   let text = `⚽ <b>${match.home_team} – ${match.away_team}</b>\n`
-  text += `Tulos: <b>${match.home_score}–${match.away_score}</b>\n\n`
+  text += `Tulos: <tg-spoiler><b>${match.home_score}–${match.away_score}</b>\n\n`
   text += '<b>Pisteet:</b>\n'
 
   for (const pred of sorted) {
@@ -104,6 +104,7 @@ export async function sendResultMessage(
     const matchPoints = predMap[row.user_id]?.points ?? 0
     text += `${row.new_position}. ${row.display_name} — ${row.total} p <i>(${arrow}, +${matchPoints})</i>\n`
   }
+  text += '</tg-spoiler>'
 
   await sendMessage(GROUP_CHAT_ID, text)
 }
@@ -301,7 +302,7 @@ export async function sendStatsTable(chatId?: number | string): Promise<void> {
     }
   }
 
-  const sorted = Object.values(stats).sort((a, b) => b.total - a.total)
+  const sorted = Object.values(stats).sort((a, b) => b.total - a.total || b.exact - a.exact)
   const scoredMatches = Math.max(...sorted.map(s => s.matches), 0)
 
   const pct = (n: number, d: number) => d > 0 ? Math.round(n / d * 100) + '%' : '–'
@@ -552,7 +553,10 @@ export async function sendTopScorers(chatId?: number | string): Promise<void> {
   const { fetchTopScorers } = await import('../football-data/client')
   const { getCountry } = await import('../countries')
 
-  const scorers = await fetchTopScorers(10)
+  const rawScorers = await fetchTopScorers(10)
+  const scorers = [...rawScorers].sort(
+    (a, b) => b.goals - a.goals || (b.assists ?? 0) - (a.assists ?? 0),
+  )
 
   if (scorers.length === 0) {
     await sendMessage(target, 'ℹ️ Maalipörssi ei ole vielä käytettävissä.')
@@ -689,6 +693,46 @@ export async function sendOddsReport(chatId?: number | string): Promise<void> {
     `${matches.length} ottelua · ${uniqueMatchDates} päivää haettu</i>`
 
   await sendMessage(target, text)
+}
+
+// ─── Streaks ─────────────────────────────────────────────────────────────────
+
+export async function sendStreaks(chatId?: number | string): Promise<void> {
+  const target = String(chatId ?? GROUP_CHAT_ID)
+  const admin = createServiceRoleClient()
+  const { computeStreaks, STREAK_LABELS } = await import('../streaks')
+  const players = await computeStreaks(admin)
+
+  if (players.length === 0) {
+    await sendMessage(target, 'ℹ️ Ei putkitietoja saatavilla.')
+    return
+  }
+
+  const types = Object.keys(STREAK_LABELS) as (keyof typeof STREAK_LABELS)[]
+
+  let text = '🔥 <b>Putket</b>\n'
+  text += '<i>Nyk = nykyinen putki · Max = pisimmillään</i>\n\n'
+
+  for (const type of types) {
+    const label = STREAK_LABELS[type]
+    const entries = players
+      .map(p => ({ name: p.display_name, ...p.streaks[type] }))
+      .filter(p => p.current > 0 || p.best > 0)
+      .sort((a, b) => b.current - a.current || b.best - a.best)
+      .slice(0, 3)
+
+    if (entries.length === 0) continue
+
+    text += `${label}\n`
+    for (const e of entries) {
+      text += `  ${e.name}: <b>${e.current}</b>`
+      if (e.best > e.current) text += ` (max ${e.best})`
+      text += '\n'
+    }
+    text += '\n'
+  }
+
+  await sendMessage(target, text.trim())
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

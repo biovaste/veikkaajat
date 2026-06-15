@@ -202,7 +202,7 @@ export default async function LeaderboardPage() {
     }
   }
 
-  const sorted = Object.values(stats).sort((a, b) => b.total - a.total)
+  const sorted = Object.values(stats).sort((a, b) => b.total - a.total || b.exact - a.exact)
   const scoredMatches = sorted.reduce((max, s) => Math.max(max, s.matches), 0)
 
   // Assign chart colors (explicit picks first, rest filled from pool)

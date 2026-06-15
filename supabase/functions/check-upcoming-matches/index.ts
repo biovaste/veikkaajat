@@ -198,7 +198,7 @@ function helsinkiMinute(date: Date): number {
 
 function isLateNight(kickoffAt: Date): boolean {
   const h = helsinkiHour(kickoffAt)
-  return h >= 23 || h < 5
+  return h >= 23 || h <= 5
 }
 
 function shouldSendReminder(kickoffAt: Date, now: Date): boolean {
@@ -211,6 +211,92 @@ function shouldSendReminder(kickoffAt: Date, now: Date): boolean {
   // Send 30 min before kickoff (within this 5-min cron window)
   const diffMs = kickoffAt.getTime() - now.getTime()
   return diffMs > 25 * 60 * 1000 && diffMs <= 35 * 60 * 1000
+}
+
+// ─── Post category bets when deadline closes ──────────────────────────────────
+
+// deno-lint-ignore no-explicit-any
+async function postCategoryBetsIfNeeded(db: any, match: { id: number; home_team: string; away_team: string; kickoff_at: string; group: string | null }) {
+  // Is this the first match of the whole tournament?
+  const { data: firstMatch } = await db
+    .from('matches')
+    .select('id, kickoff_at')
+    .order('kickoff_at', { ascending: true })
+    .limit(1)
+    .single()
+
+  const isFirstMatch = firstMatch?.id === match.id
+
+  // Is this the first match of its group?
+  let isFirstOfGroup = false
+  if (match.group) {
+    const { data: firstGroupMatch } = await db
+      .from('matches')
+      .select('id')
+      .eq('group', match.group)
+      .order('kickoff_at', { ascending: true })
+      .limit(1)
+      .single()
+    isFirstOfGroup = firstGroupMatch?.id === match.id
+  }
+
+  if (!isFirstMatch && !isFirstOfGroup) {
+    await db.from('matches').update({ category_bets_posted: true }).eq('id', match.id)
+    return
+  }
+
+  const { data: allPlayers } = await db.from('profiles').select('id, display_name').order('display_name')
+  const nameMap: Record<string, string> = Object.fromEntries((allPlayers ?? []).map((p: { id: string; display_name: string }) => [p.id, p.display_name]))
+
+  if (isFirstMatch) {
+    // Post WORLD_CHAMPION and TOP_SCORER bets
+    const { data: bets } = await db
+      .from('category_bets')
+      .select('user_id, category, bet_value')
+      .in('category', ['WORLD_CHAMPION', 'TOP_SCORER'])
+
+    let text = `🏆 <b>Erikoisveikkaukset — alkuperäiset valinnat</b>\n\n`
+
+    const champBets = (bets ?? []).filter((b: { category: string }) => b.category === 'WORLD_CHAMPION')
+    if (champBets.length > 0) {
+      text += '<b>🌍 Maailmanmestari:</b>\n'
+      for (const b of champBets) {
+        text += `${nameMap[b.user_id] ?? '?'}: ${b.bet_value}\n`
+      }
+      text += '\n'
+    }
+
+    const scorerBets = (bets ?? []).filter((b: { category: string }) => b.category === 'TOP_SCORER')
+    if (scorerBets.length > 0) {
+      text += '<b>⚽ Maalikuningas:</b>\n'
+      for (const b of scorerBets) {
+        text += `${nameMap[b.user_id] ?? '?'}: ${b.bet_value}\n`
+      }
+    }
+
+    await tgSend(GROUP_CHAT_ID, text.trim())
+  }
+
+  if (isFirstOfGroup && match.group) {
+    // Post GROUP_ADVANCE bets for this group
+    const groupKey = match.group // e.g. "GROUP_A"
+    const { data: bets } = await db
+      .from('category_bets')
+      .select('user_id, bet_value')
+      .eq('category', `GROUP_ADVANCE_${groupKey}`)
+
+    if (bets && bets.length > 0) {
+      const groupLabel = groupKey.replace('GROUP_', 'Ryhmä ')
+      let text = `📋 <b>Jatkoon pääsevät — ${groupLabel}</b>\n\n`
+      for (const b of bets) {
+        const teams = (b.bet_value ?? '').split(',').map((t: string) => t.trim()).join(' & ')
+        text += `${nameMap[b.user_id] ?? '?'}: ${teams}\n`
+      }
+      await tgSend(GROUP_CHAT_ID, text.trim())
+    }
+  }
+
+  await db.from('matches').update({ category_bets_posted: true }).eq('id', match.id)
 }
 
 Deno.serve(async (_req) => {
@@ -231,7 +317,7 @@ Deno.serve(async (_req) => {
 
   const { data: kMatches } = await db
     .from('matches')
-    .select('id, home_team, away_team, kickoff_at')
+    .select('id, home_team, away_team, kickoff_at, category_bets_posted, group')
     .eq('kickoff_msg_sent', false)
     .lte('kickoff_at', deadlinePassed.toISOString())
     .gte('kickoff_at', catchUpWindow.toISOString())
@@ -281,6 +367,12 @@ Deno.serve(async (_req) => {
     // Only mark sent if Telegram accepted the message, so failures retry next run
     if (!error) {
       await db.from('matches').update({ kickoff_msg_sent: true }).eq('id', match.id)
+    }
+
+    // ── Post special bets when their deadline closes ──────────────────────────
+    // Runs after marking kickoff_msg_sent to avoid double-posting on retry.
+    if (!error && !match.category_bets_posted) {
+      await postCategoryBetsIfNeeded(db, match)
     }
   }
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { sendMessage, sendMessageWithMarkup, answerCallbackQuery } from '@/lib/telegram/bot'
-import { sendStatsTable, sendChartImage, sendClanWar, sendTopScorers, sendOddsReport } from '@/lib/telegram/notify'
+import { sendStatsTable, sendChartImage, sendClanWar, sendTopScorers, sendOddsReport, sendStreaks } from '@/lib/telegram/notify'
+import { scoreMatchAndNotify } from '@/lib/scoring/score-and-notify'
 import { pollAndScoreFinishedMatches } from '@/lib/poll-and-score'
 import { createServiceRoleClient } from '@/lib/supabase/server'
 import { getCountry } from '@/lib/countries'
@@ -113,6 +114,21 @@ export async function POST(request: NextRequest) {
       console.error('[webhook /luokkasota]', err)
       await sendMessage(chatId, '⚠️ Luokkasota ei onnistu juuri nyt.').catch(console.error)
     })
+  } else if (text === '/putki' && isGroup) {
+    await sendStreaks(chatId).catch(async (err) => {
+      console.error('[webhook /putki]', err)
+      await sendMessage(chatId, '⚠️ Putket ei onnistu juuri nyt.').catch(console.error)
+    })
+  } else if (text === '/matchid' && isGroup) {
+    await handleMatchId(chatId, msg.from.id).catch(async (err) => {
+      console.error('[webhook /matchid]', err)
+      await sendMessage(chatId, '⚠️ Ottelutunnukset ei onnistu juuri nyt.').catch(console.error)
+    })
+  } else if (text.startsWith('/setscore') && isGroup) {
+    await handleSetScore(chatId, msg.from.id, text).catch(async (err) => {
+      console.error('[webhook /setscore]', err)
+      await sendMessage(chatId, '⚠️ Tulosasetus epäonnistui.').catch(console.error)
+    })
   } else if (text === '/odds' && isGroup) {
     await sendOddsReport(chatId).catch(async (err) => {
       console.error('[webhook /odds]', err)
@@ -136,13 +152,119 @@ export async function POST(request: NextRequest) {
     const dmNote = isDM ? '\n\n📩 <b>Omat komennot (yksityisviesti):</b>\n/veikkaukset — seuraavat 5 veikkaustasi' : ''
     await sendMessage(
       chatId,
-      '📋 <b>Komennot (ryhmässä):</b>\n/chart — pistekehityskaavio\n/stats — tilastotaulukko\n/odds — kerroinanalyysi (KA-kerroin & ROI)\n/luokkasota — klaanien pistetilanne\n/maaliporssi — turnauksen maalipörssi (top 10)\n/haetulos — hae tulos heti' +
+      '📋 <b>Komennot (ryhmässä):</b>\n/chart — pistekehityskaavio\n/stats — tilastotaulukko\n/odds — kerroinanalyysi (KA-kerroin & ROI)\n/luokkasota — klaanien pistetilanne\n/maaliporssi — turnauksen maalipörssi (top 10)\n/putki — peräkkäisputket (top 3)\n/haetulos — hae tulos heti\n/setscore &lt;id&gt; &lt;k-v&gt; — aseta tulos (vain admin)\n/matchid — ottelutunnukset (vain admin)' +
       dmNote +
       '\n\nVeikkaa: ' + (process.env.NEXT_PUBLIC_APP_URL ?? ''),
     ).catch(console.error)
   }
 
   return NextResponse.json({ ok: true })
+}
+
+// ── /matchid handler (admin only) ────────────────────────────────────────────
+
+async function handleMatchId(chatId: number, telegramUserId: number): Promise<void> {
+  const admin = createServiceRoleClient()
+
+  const { data: profile } = await admin
+    .from('profiles')
+    .select('is_admin')
+    .eq('telegram_chat_id', String(telegramUserId))
+    .maybeSingle()
+
+  if (!profile?.is_admin) {
+    await sendMessage(chatId, '🔒 Tämä komento on vain admineille.')
+    return
+  }
+
+  const now = new Date().toISOString()
+
+  const [{ data: prev }, { data: next }] = await Promise.all([
+    admin.from('matches')
+      .select('id, home_team, away_team, kickoff_at, home_score, away_score, status')
+      .lt('kickoff_at', now)
+      .order('kickoff_at', { ascending: false })
+      .limit(2),
+    admin.from('matches')
+      .select('id, home_team, away_team, kickoff_at, status')
+      .gte('kickoff_at', now)
+      .order('kickoff_at', { ascending: true })
+      .limit(2),
+  ])
+
+  const fmt = (m: { id: number; home_team: string; away_team: string; kickoff_at: string; home_score?: number | null; away_score?: number | null }) => {
+    const homeFi = getCountry(m.home_team).name
+    const awayFi = getCountry(m.away_team).name
+    const date = formatDate(m.kickoff_at)
+    const score = m.home_score != null ? ` ${m.home_score}–${m.away_score}` : ''
+    return `#${m.id} ${homeFi} – ${awayFi}${score} <i>(${date})</i>`
+  }
+
+  let text = '🔢 <b>Ottelutunnukset</b>\n\n'
+  text += '<b>Edelliset:</b>\n'
+  for (const m of (prev ?? []).reverse()) text += fmt(m) + '\n'
+  text += '\n<b>Seuraavat:</b>\n'
+  for (const m of next ?? []) text += fmt(m) + '\n'
+
+  await sendMessage(chatId, text)
+}
+
+// ── /setscore handler (admin only) ───────────────────────────────────────────
+
+async function handleSetScore(chatId: number, telegramUserId: number, text: string): Promise<void> {
+  const admin = createServiceRoleClient()
+
+  // Check admin
+  const { data: profile } = await admin
+    .from('profiles')
+    .select('id, is_admin')
+    .eq('telegram_chat_id', String(telegramUserId))
+    .maybeSingle()
+
+  if (!profile?.is_admin) {
+    await sendMessage(chatId, '🔒 Tämä komento on vain admineille.')
+    return
+  }
+
+  // Parse: /setscore <id> <home>-<away>
+  const parts = text.trim().split(/\s+/)
+  const matchId = parseInt(parts[1] ?? '', 10)
+  const scoreStr = parts[2] ?? ''
+  const scoreMatch = scoreStr.match(/^(\d+)\s*[-–:]\s*(\d+)$/)
+
+  if (isNaN(matchId) || !scoreMatch) {
+    await sendMessage(chatId, '⚠️ Käyttö: /setscore &lt;ottelu-id&gt; &lt;koti-vieras&gt;\nEsim: /setscore 42 2-1')
+    return
+  }
+
+  const homeScore = parseInt(scoreMatch[1], 10)
+  const awayScore = parseInt(scoreMatch[2], 10)
+
+  // Verify match exists
+  const { data: match } = await admin
+    .from('matches')
+    .select('id, home_team, away_team')
+    .eq('id', matchId)
+    .single()
+
+  if (!match) {
+    await sendMessage(chatId, `⚠️ Ottelua #${matchId} ei löydy.`)
+    return
+  }
+
+  const homeFi = getCountry(match.home_team).name
+  const awayFi = getCountry(match.away_team).name
+
+  await sendMessage(chatId, `⏳ Asetetaan tulos ${homeFi} – ${awayFi}: ${homeScore}–${awayScore}…`)
+
+  const { scored, error } = await scoreMatchAndNotify(admin, matchId, homeScore, awayScore)
+
+  if (error) {
+    await sendMessage(chatId, `⚠️ Virhe: ${error}`)
+    return
+  }
+
+  await sendMessage(chatId, `✅ Tulos asetettu: ${homeFi} – ${awayFi} ${homeScore}–${awayScore}\n${scored} veikkausta pisteytetty.`)
 }
 
 // ── /veikkaukset handler ──────────────────────────────────────────────────────

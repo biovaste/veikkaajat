@@ -129,28 +129,38 @@ async function sendResultMessage(
   const [{ data: preds }, { data: players }, { data: log }] = await Promise.all([
     db.from('predictions').select('user_id, home_score_pred, away_score_pred, points').eq('match_id', matchId),
     db.from('profiles').select('id, display_name'),
-    db.from('scoring_log').select('user_id, points, match_id'),
+    db.from('scoring_log').select('user_id, points, match_id, breakdown'),
   ])
 
   const prevTotals: Record<string, number> = {}
   const newTotals: Record<string, number> = {}
+  const prevExact: Record<string, number> = {}
+  const newExact:  Record<string, number> = {}
   for (const r of log ?? []) {
-    if (r.match_id !== matchId) prevTotals[r.user_id] = (prevTotals[r.user_id] ?? 0) + r.points
+    const b = r.breakdown as { result: number; home_goals: number; away_goals: number } | null
+    const isExact = b?.result === 3 && b?.home_goals === 1 && b?.away_goals === 1
+    if (r.match_id !== matchId) {
+      prevTotals[r.user_id] = (prevTotals[r.user_id] ?? 0) + r.points
+      if (isExact) prevExact[r.user_id] = (prevExact[r.user_id] ?? 0) + 1
+    }
     newTotals[r.user_id] = (newTotals[r.user_id] ?? 0) + r.points
+    if (isExact) newExact[r.user_id] = (newExact[r.user_id] ?? 0) + 1
   }
 
-  const rankMap = (totals: Record<string, number>) => {
-    const sorted = Object.entries(totals).sort((a, b) => b[1] - a[1])
+  const rankMap = (totals: Record<string, number>, exact: Record<string, number>) => {
+    const sorted = Object.entries(totals).sort(
+      (a, b) => b[1] - a[1] || (exact[b[0]] ?? 0) - (exact[a[0]] ?? 0),
+    )
     return Object.fromEntries(sorted.map(([id], i) => [id, i + 1]))
   }
-  const prevRanks = rankMap(prevTotals)
-  const newRanks  = rankMap(newTotals)
+  const prevRanks = rankMap(prevTotals, prevExact)
+  const newRanks  = rankMap(newTotals, newExact)
   const nameMap   = Object.fromEntries((players ?? []).map(p => [p.id, p.display_name]))
   const predMap   = Object.fromEntries((preds ?? []).map(p => [p.user_id, p]))
   const sortedPreds = [...(preds ?? [])].sort((a, b) => (b.points ?? 0) - (a.points ?? 0))
 
   let text = `⚽ <b>${match.home_team} – ${match.away_team}</b>\n`
-  text += `Tulos: <b>${homeScore}–${awayScore}</b>\n\n<b>Pisteet:</b>\n`
+  text += `Tulos: <tg-spoiler><b>${homeScore}–${awayScore}</b>\n\n<b>Pisteet:</b>\n`
   for (const pred of sortedPreds) {
     text += `${nameMap[pred.user_id] ?? '?'}: ${pred.points ?? 0} p (veikkaus ${pred.home_score_pred}–${pred.away_score_pred})\n`
   }
@@ -167,6 +177,7 @@ async function sendResultMessage(
     const arrow = delta > 0 ? `↑${delta}` : delta < 0 ? `↓${Math.abs(delta)}` : '→'
     text += `${newRanks[p.id]}. ${p.display_name} — ${newTotals[p.id] ?? 0} p <i>(${arrow}, +${predMap[p.id]?.points ?? 0})</i>\n`
   }
+  text += '</tg-spoiler>'
 
   await tgSend(GROUP_CHAT_ID, text)
 }
