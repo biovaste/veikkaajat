@@ -233,7 +233,7 @@ async function postCategoryBetsIfNeeded(db: any, match: { id: number; home_team:
     const { data: firstGroupMatch } = await db
       .from('matches')
       .select('id')
-      .eq('group', match.group)
+      .eq('group_name', match.group)
       .order('kickoff_at', { ascending: true })
       .limit(1)
       .single()
@@ -278,18 +278,18 @@ async function postCategoryBetsIfNeeded(db: any, match: { id: number; home_team:
   }
 
   if (isFirstOfGroup && match.group) {
-    // Post GROUP_ADVANCE bets for this group
-    const groupKey = match.group // e.g. "GROUP_A"
+    // Post GROUP_ADVANCE bets for this group (category = group_name, e.g. "GROUP_C")
+    const groupKey = match.group
     const { data: bets } = await db
       .from('category_bets')
       .select('user_id, bet_value')
-      .eq('category', `GROUP_ADVANCE_${groupKey}`)
+      .eq('category', groupKey)
 
     if (bets && bets.length > 0) {
       const groupLabel = groupKey.replace('GROUP_', 'Ryhmä ')
       let text = `📋 <b>Jatkoon pääsevät — ${groupLabel}</b>\n\n`
       for (const b of bets) {
-        const teams = (b.bet_value ?? '').split(',').map((t: string) => t.trim()).join(' & ')
+        const teams = JSON.parse(b.bet_value ?? '[]').join(' & ')
         text += `${nameMap[b.user_id] ?? '?'}: ${teams}\n`
       }
       await tgSend(GROUP_CHAT_ID, text.trim())
@@ -317,7 +317,7 @@ Deno.serve(async (_req) => {
 
   const { data: kMatches } = await db
     .from('matches')
-    .select('id, home_team, away_team, kickoff_at, category_bets_posted, group')
+    .select('id, home_team, away_team, kickoff_at, category_bets_posted, group_name')
     .eq('kickoff_msg_sent', false)
     .lte('kickoff_at', deadlinePassed.toISOString())
     .gte('kickoff_at', catchUpWindow.toISOString())
@@ -372,7 +372,7 @@ Deno.serve(async (_req) => {
     // ── Post special bets when their deadline closes ──────────────────────────
     // Runs after marking kickoff_msg_sent to avoid double-posting on retry.
     if (!error && !match.category_bets_posted) {
-      await postCategoryBetsIfNeeded(db, match)
+      await postCategoryBetsIfNeeded(db, { ...match, group: match.group_name ?? null })
     }
   }
 

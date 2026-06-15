@@ -84,7 +84,12 @@
       "Bash(curl -s \"https://therundown-therundown-v1.p.rapidapi.com/sports/18/events/2026-06-13\" -H \"x-rapidapi-host: therundown-therundown-v1.p.rapidapi.com\" -H \"x-rapidapi-key: e78182c96amshd444c87ee164c70p175c73jsnb1bde0960c45\")",
       "Bash(node -e \"const c=[];process.stdin.on\\('data',d=>c.push\\(d\\)\\);process.stdin.on\\('end',\\(\\)=>{const d=JSON.parse\\(c.join\\(''\\)\\);for\\(const e of d.events??[]\\){console.log\\(e.teams?.[1]?.name,'vs',e.teams?.[0]?.name\\)}}\\)\")",
       "Bash(npx ts-node -e ' *)",
-      "Bash(npm test *)"
+      "Bash(npm test *)",
+      "mcp__00b64788-5d2b-4f44-a45c-8efe4ac6a555__list_projects",
+      "mcp__00b64788-5d2b-4f44-a45c-8efe4ac6a555__apply_migration",
+      "mcp__00b64788-5d2b-4f44-a45c-8efe4ac6a555__deploy_edge_function",
+      "mcp__00b64788-5d2b-4f44-a45c-8efe4ac6a555__execute_sql",
+      "Bash(curl -s -X POST \"https://coasklygmrpolgtssjnj.supabase.co/functions/v1/post-group-bets-once\")"
     ]
   }
 }

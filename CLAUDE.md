@@ -89,7 +89,9 @@ All tables are in `supabase/migrations/`. Migrations 0001–0011 must be applied
 - `profiles.clan` — 'Beeläiset' | 'Ceeläiset' | 'Independents' | NULL; chosen by player in /settings
 - `matches.reminder_sent`, `matches.kickoff_msg_sent` — prevent double Telegram messages
 - `matches.home_xg`, `matches.away_xg` — xG data; `matches.fs_match_id`, `matches.fs_xg_attempts` — Flashscore id + fetch attempt cap (migration 0013; `af_fixture_id` is legacy/dormant)
+- `matches.category_bets_posted` — boolean; set true after special bets for this match's group/tournament have been posted to Telegram (migration 0014)
 - `fs_requests` table — log of every Flashscore API call, enforces the 500/month hard limit
+- `streak_seeds` table — pre-tournament streak values per player per type; `unique(display_name, streak_type)`; `streak_type` in ('correct_5p','right_result','wrong_result','zero_p','non_zero_p','non_5p') (migration 0014)
 
 **To mark yourself as admin** (run once in Supabase SQL editor after first login):
 ```sql
@@ -153,8 +155,10 @@ lib/
                           # per-stat heatmap: green (best) → red (worst), lowerIsBetter flag for Nol%
                           # sendClanWar() — clan rankings for /luokkasota command
                           # sendTopScorers() — top 10 scorers for /maaliporssi command
-  scoring/engine.ts       # calculatePoints() — pure function, unit-tested
-  poll-and-score.ts       # pollAndScoreFinishedMatches() — shared logic for /haetulos (available to all group members)
+  scoring/engine.ts           # calculatePoints() — pure function, unit-tested
+  scoring/score-and-notify.ts # scoreMatchAndNotify() — shared by /setscore bot cmd, override-result API, poll-and-score
+  poll-and-score.ts           # pollAndScoreFinishedMatches() — shared logic for /haetulos (available to all group members)
+  streaks.ts                  # computeStreaks(admin) — reads scoring_log + streak_seeds, returns current+best per player per type
   players.ts              # TOP_SCORER_PLAYERS list (~80 players, no rank field),
                           # sorted by Finnish country name; wildcard helpers
   countries.ts            # getCountry(), flagUrl(), groupLabel()
@@ -172,7 +176,8 @@ app/api/
   admin/invite-player/route.ts        # POST: send magic link invite
   admin/generate-login-link/route.ts  # POST: generate magic link and return URL (admin only, no email sent)
   telegram/
-    webhook/route.ts              # Telegram bot webhook — /start, /chart, /stats, /luokkasota, /maaliporssi, /haetulos, /help (group)
+    webhook/route.ts              # Telegram bot webhook — /start, /chart, /stats, /luokkasota, /maaliporssi, /putki, /haetulos, /help (group)
+                                  # admin: /setscore, /matchid
                                   # /veikkaukset (DM); callback_query handler for edit:{matchId}; ForceReply prediction editing
 
 proxy.ts                # Next.js proxy (was: middleware): session refresh + auth redirect
@@ -193,10 +198,12 @@ supabase/
     0011_clan.sql                 # clan on profiles (CHECK constraint, 3 allowed values)
     0012_chat.sql                 # chat_messages table + RLS (read all, insert/delete own)
     0013_flashscore.sql           # fs_match_id + fs_xg_attempts on matches; fs_requests budget log
+    0014_streaks_and_bets_posted.sql  # streak_seeds table + category_bets_posted on matches
   functions/
-    poll-match-results/index.ts      # Deno: polls football-data.org, scores, fetches xG, sends result message
+    poll-match-results/index.ts      # Deno: polls football-data.org, scores, fetches xG, sends result message (spoiler-formatted)
     check-upcoming-matches/index.ts  # Deno: sends reminder DMs + predictions-reveal group message
                                      # (sent when betting closes, 5 min before kickoff)
+                                     # also posts category bets (champion/scorer/group advance) when their deadline closes
 
 types/
   database.ts            # Hand-written types (replace with supabase gen types)
@@ -275,9 +282,14 @@ Bot: `@veikkaajat_apumarko_bot`
 - `/chart` — cumulative points line chart image (QuickChart.io)
 - `/stats` — full stats board image (same columns as /leaderboard: Pts, KA, Tark, Mrk%, Nol%, L-KA, J-KA, Tas%, Yllätys%, Jht, xG-Pts, Bonus) rendered with next/og; each stat cell color-coded green (best) → red (worst); after the betting deadline also Mestari + Maalikuningas pick columns (uncolored text); caption has legend + link; falls back to text summary on error
 - `/luokkasota` — clan rankings: total + average pts per clan, members listed under each
-- `/maaliporssi` — top 10 tournament scorers from football-data.org (player, Finnish country name, goals, assists)
+- `/maaliporssi` — top 10 tournament scorers from football-data.org (player, Finnish country name, goals, assists); sorted by goals desc then assists desc
+- `/putki` — streak overview: top 3 per streak type (correct_5p, right_result, wrong_result, zero_p, non_zero_p, non_5p); current + best per player
 - `/haetulos` — available to all group members; immediately polls football-data.org for any match that kicked off 85+ min ago and isn't scored yet, scores it, and sends the result message. If FD hasn't flipped FINISHED yet (free-tier lag ~20–35 min), falls back to Flashscore's results feed (works right after the final whistle; throttled to 1 call/3 min)
 - `/help` — lists commands
+
+**Admin-only commands (group):**
+- `/setscore <id> <h-a>` — set match result (e.g. `/setscore 42 2-1`); scores predictions + sends result message; caller must have `telegram_chat_id` matching an `is_admin` profile
+- `/matchid` — shows 2 previous + 2 next matches with id, teams, score, kickoff time
 
 **Commands (DM):**
 - `/start` — bot replies with the user's Telegram chat ID
@@ -354,6 +366,21 @@ npm test           # vitest unit tests
 - Players pick their clan in `/settings` (radio buttons, saveable independently)
 - `/luokkasota` Telegram command: clan totals + averages (ranked by avg), members listed per clan
 - `sendClanWar()` in `lib/telegram/notify.ts`
+
+### ✅ Phase 5e — Streaks, Spoilers, Tie-breakers & Bot Commands
+- **Streak tracking** (`lib/streaks.ts`, `streak_seeds` table, migration 0014):
+  - 6 streak types per player: `correct_5p`, `right_result`, `wrong_result`, `zero_p`, `non_zero_p`, `non_5p`
+  - Seeds from `streak_seeds` table (pre-tournament values); extended/reset chronologically from `scoring_log`
+  - `computeStreaks(admin)` — pure async function, returns current + best per player per type
+- **`/putki` Telegram command** (group): top 3 per streak type; calls `sendStreaks()` in `lib/telegram/notify.ts`
+- **`/matchid` Telegram command** (admin only): 2 previous + 2 next matches with id, teams, score, date
+- **`/setscore <id> <h-a>` Telegram command** (admin only): sets match result + scores predictions + sends Telegram message; calls shared `scoreMatchAndNotify()` in `lib/scoring/score-and-notify.ts`
+- **Shared scoring helper** `lib/scoring/score-and-notify.ts`: `scoreMatchAndNotify()` used by `/setscore`, `/admin/override-result`, and `/haetulos`
+- **Spoiler formatting**: result messages wrap everything after "Tulos:" in `<tg-spoiler>` (score, per-player points, leaderboard) — both cron (`poll-match-results`) and notify.ts
+- **Tark tie-breaker**: leaderboard (`app/leaderboard/page.tsx`), result message sort (`lib/telegram/notify.ts`), and edge function `poll-match-results` all use exact matches (Tark) as secondary sort when points are tied
+- **Assists tie-breaker** in `/maaliporssi`: top scorers sorted by goals desc then assists desc
+- **Category bets auto-posting** (`category_bets_posted` column, migration 0014): `check-upcoming-matches` edge function posts champion/scorer picks when tournament's first match closes, group advance picks when first match of each group closes. `category_bets.category` values match `group_name` directly (`GROUP_C` etc.)
+- **Late-night fix**: `isLateNight()` now uses `h <= 5` (was `h < 5`) — matches at 05:00 Helsinki correctly get the 22:00 reminder
 
 ### ✅ Phase 5d — Admin & Chat
 - Login link generator: `POST /api/admin/generate-login-link` uses `auth.admin.generateLink()` (service role); button in `/admin/players` copies link to clipboard — no email needed
