@@ -119,12 +119,12 @@ export async function POST(request: NextRequest) {
       console.error('[webhook /putki]', err)
       await sendMessage(chatId, '⚠️ Putket ei onnistu juuri nyt.').catch(console.error)
     })
-  } else if (text === '/matchid' && isGroup) {
+  } else if (text === '/matchid' && (isGroup || isDM)) {
     await handleMatchId(chatId, msg.from.id).catch(async (err) => {
       console.error('[webhook /matchid]', err)
       await sendMessage(chatId, '⚠️ Ottelutunnukset ei onnistu juuri nyt.').catch(console.error)
     })
-  } else if (text.startsWith('/setscore') && isGroup) {
+  } else if (text.startsWith('/setscore') && (isGroup || isDM)) {
     await handleSetScore(chatId, msg.from.id, text).catch(async (err) => {
       console.error('[webhook /setscore]', err)
       await sendMessage(chatId, '⚠️ Tulosasetus epäonnistui.').catch(console.error)

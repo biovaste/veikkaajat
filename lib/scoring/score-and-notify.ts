@@ -14,10 +14,10 @@ export async function scoreMatchAndNotify(
   awayScore: number,
 ): Promise<{ scored: number; error?: string }> {
   // Snapshot leaderboard BEFORE scoring this match (exclude current match's log)
-  const { data: prevLog } = await admin
-    .from('scoring_log')
-    .select('user_id, points, breakdown')
-    .neq('match_id', matchId)
+  const [{ data: prevLog }, { data: catBets }] = await Promise.all([
+    admin.from('scoring_log').select('user_id, points, breakdown').neq('match_id', matchId),
+    admin.from('category_bets').select('user_id, points'),
+  ])
 
   const prevTotals: Record<string, number> = {}
   const prevExact: Record<string, number> = {}
@@ -27,6 +27,10 @@ export async function scoreMatchAndNotify(
     if (b?.result === 3 && b?.home_goals === 1 && b?.away_goals === 1) {
       prevExact[r.user_id] = (prevExact[r.user_id] ?? 0) + 1
     }
+  }
+  // Include category bet bonus in totals so the leaderboard reflects the real standings
+  for (const r of catBets ?? []) {
+    if (r.points != null) prevTotals[r.user_id] = (prevTotals[r.user_id] ?? 0) + r.points
   }
 
   const { data: players } = await admin
