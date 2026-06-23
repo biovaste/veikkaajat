@@ -247,6 +247,7 @@ export default async function LeaderboardPage() {
   const hasBonus = !categoryBetsOpen && sorted.some(x => x.bonus > 0)
 
   const pctCell = (n: number, d: number) => ({ display: pct(n, d), num: d > 0 ? n / d * 100 : null })
+  const pctNCell = (n: number, d: number) => ({ display: d > 0 ? `${pct(n, d)} (${d})` : '–', num: d > 0 ? n / d * 100 : null })
   const avgCell = (p: number, n: number) => ({ display: avg(p, n), num: n > 0 ? p / n : null })
   const numCell = (v: number) => ({ display: String(v), num: v })
 
@@ -277,8 +278,8 @@ export default async function LeaderboardPage() {
       nol: pctCell(s.zero_matches, s.matches),
       lka: avgCell(s.group_pts, s.group_n),
       jka: avgCell(s.knockout_pts, s.knockout_n),
-      tas: pctCell(s.draw_correct, s.draw_preds),
-      yll: pctCell(s.yllatys_correct, s.yllatys_total),
+      tas: pctNCell(s.draw_correct, s.draw_preds),
+      yll: pctNCell(s.yllatys_correct, s.yllatys_total),
       jht: numCell(s.lead_count),
       ...(hasXg ? { xg: s.xg_n > 0 ? numCell(s.xg_pts) : { display: '–', num: null } } : {}),
       ...(hasBonus ? { bonus: s.bonus > 0 ? { display: `+${s.bonus}`, num: s.bonus } : { display: '–', num: null } } : {}),
