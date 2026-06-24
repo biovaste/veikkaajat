@@ -90,8 +90,8 @@ export default async function HistoryPage({
     { data: allPreds },
   ] = await Promise.all([
     supabase.from('competitions').select('id, name, type, year').order('year'),
-    supabase.from('hist_matches').select('id, competition_id, stage, home_goals, away_goals, result_sign'),
-    supabase.from('hist_predictions').select('match_id, player_name, home_pred, away_pred, sign_pred, points'),
+    supabase.from('hist_matches').select('id, competition_id, stage, home_goals, away_goals, result_sign').limit(10000),
+    supabase.from('hist_predictions').select('match_id, player_name, home_pred, away_pred, sign_pred, points').limit(10000),
   ])
 
   const comps = competitions ?? []
