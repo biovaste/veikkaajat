@@ -20,11 +20,12 @@ export default function Nav({ isAdmin }: NavProps) {
   }
 
   const links = [
-    { href: '/leaderboard', label: 'Pisteet', short: 'Pisteet' },
+    { href: '/leaderboard', label: 'Pisteet', short: 'Pts' },
     { href: '/matches', label: 'Ottelut', short: 'Ottelut' },
     { href: '/my-predictions', label: 'Veikkaukseni', short: 'Omat' },
     { href: '/predictions', label: 'Kaikki veikkaukset', short: 'Kaikki' },
     { href: '/bets', label: 'Erikoisveikkaukset', short: 'Bonus' },
+    { href: '/history', label: 'Historia', short: 'Hist' },
     ...(isAdmin ? [{ href: '/admin', label: 'Admin', short: 'Admin' }] : []),
   ]
 
