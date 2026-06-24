@@ -126,10 +126,11 @@ async function sendResultMessage(
     .single()
   if (!match) return
 
-  const [{ data: preds }, { data: players }, { data: log }] = await Promise.all([
+  const [{ data: preds }, { data: players }, { data: log }, { data: catBets }] = await Promise.all([
     db.from('predictions').select('user_id, home_score_pred, away_score_pred, points').eq('match_id', matchId),
     db.from('profiles').select('id, display_name'),
     db.from('scoring_log').select('user_id, points, match_id, breakdown'),
+    db.from('category_bets').select('user_id, points'),
   ])
 
   const prevTotals: Record<string, number> = {}
@@ -145,6 +146,13 @@ async function sendResultMessage(
     }
     newTotals[r.user_id] = (newTotals[r.user_id] ?? 0) + r.points
     if (isExact) newExact[r.user_id] = (newExact[r.user_id] ?? 0) + 1
+  }
+  // Include category bet bonus so the leaderboard reflects real standings
+  for (const r of catBets ?? []) {
+    if (r.points != null) {
+      prevTotals[r.user_id] = (prevTotals[r.user_id] ?? 0) + r.points
+      newTotals[r.user_id]  = (newTotals[r.user_id]  ?? 0) + r.points
+    }
   }
 
   const rankMap = (totals: Record<string, number>, exact: Record<string, number>) => {
