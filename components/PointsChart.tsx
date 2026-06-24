@@ -18,7 +18,7 @@ interface Props {
   colors?: string[]
 }
 
-type Mode = 'pisteet' | 'sijainti' | 'ero'
+type Mode = 'pisteet' | 'sijainti' | 'ero' | 'ka-ero'
 
 function SortedTooltip({
   active,
@@ -44,6 +44,7 @@ function SortedTooltip({
         const display =
           mode === 'pisteet' ? `${entry.value} p`
           : mode === 'ero' ? (entry.value === 0 ? 'johtaa' : `${entry.value} p`)
+          : mode === 'ka-ero' ? (entry.value === 0 ? '= KA' : `${entry.value > 0 ? '+' : ''}${entry.value} p`)
           : `${entry.value}. sija`
         return (
           <div key={entry.name} className="flex items-center gap-2 leading-5">
@@ -64,6 +65,7 @@ const TABS: { key: Mode; label: string; title: string }[] = [
   { key: 'pisteet',  label: 'Pisteet',  title: 'Kumulatiiviset pisteet' },
   { key: 'sijainti', label: 'Sijainti', title: 'Sijoitus ottelun jälkeen' },
   { key: 'ero',      label: 'Ero',      title: 'Pisteet suhteessa johtajaan' },
+  { key: 'ka-ero',   label: 'KA-ero',   title: 'Pisteet suhteessa keskiarvoon' },
 ]
 
 function ChartInner({
@@ -97,7 +99,7 @@ function ChartInner({
         />
         <Tooltip content={<SortedTooltip mode={mode} />} />
         <Legend iconType="plainline" wrapperStyle={{ fontSize: 12, paddingTop: 8 }} />
-        {mode === 'ero' && <ReferenceLine y={0} stroke="#d1d5db" strokeDasharray="4 4" />}
+        {(mode === 'ero' || mode === 'ka-ero') && <ReferenceLine y={0} stroke="#d1d5db" strokeDasharray="4 4" />}
         {players.map((player, i) => (
           <Line
             key={player}
@@ -137,6 +139,16 @@ export default function PointsChart({ data, players, colors }: Props) {
     })
   }, [data, players])
 
+  const avgGapData = useMemo<Record<string, number>[]>(() => {
+    return data.map(row => {
+      const vals = players.map(p => row[p] ?? 0)
+      const avg = vals.reduce((a, b) => a + b, 0) / (vals.length || 1)
+      const result: Record<string, number> = { match: row.match }
+      players.forEach(p => { result[p] = Math.round(((row[p] ?? 0) - avg) * 10) / 10 })
+      return result
+    })
+  }, [data, players])
+
   const close = useCallback(() => setExpanded(false), [])
 
   useEffect(() => {
@@ -152,7 +164,7 @@ export default function PointsChart({ data, players, colors }: Props) {
 
   if (data.length === 0 && players.length === 0) return null
 
-  const activeData = mode === 'pisteet' ? data : mode === 'sijainti' ? rankData : gapData
+  const activeData = mode === 'pisteet' ? data : mode === 'sijainti' ? rankData : mode === 'ero' ? gapData : avgGapData
   const title = TABS.find(t => t.key === mode)?.title
 
   const header = (onExpand?: () => void) => (
