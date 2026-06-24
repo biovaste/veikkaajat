@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import { Suspense } from 'react'
 import CompPicker from './CompPicker'
 import HistoryStatsTable from './HistoryStatsTable'
+import HistoryOverviewTable from './HistoryOverviewTable'
 
 export const dynamic = 'force-dynamic'
 
@@ -125,40 +126,12 @@ export default async function HistoryPage({
           Turnausvertailu
         </summary>
 
-        <div className="mt-3 overflow-x-auto">
-          <table className="text-sm border-collapse">
-            <thead>
-              <tr className="border-b border-gray-200">
-                <th className="text-left py-2 pr-6 font-medium text-gray-500 whitespace-nowrap sticky left-0 bg-white">Pelaaja</th>
-                {comps.map(c => (
-                  <th key={c.id} className="px-3 py-2 font-medium text-gray-500 text-right whitespace-nowrap">{c.id}</th>
-                ))}
-                <th className="px-3 py-2 font-medium text-gray-700 text-right whitespace-nowrap">Yht.</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {overviewPlayers.map((name, i) => {
-                const total = allTimeTotal(name)
-                return (
-                  <tr key={name} className={i === 0 ? 'bg-yellow-50' : 'hover:bg-gray-50'}>
-                    <td className="py-2.5 pr-6 font-medium sticky left-0 bg-inherit">{name}</td>
-                    {comps.map(c => {
-                      const pts = compTotals[name]?.[c.id]
-                      const compBest = Math.max(...overviewPlayers.map(n => compTotals[n]?.[c.id] ?? 0))
-                      const isBest = pts !== undefined && pts === compBest
-                      return (
-                        <td key={c.id} className={`px-3 py-2.5 text-right tabular-nums ${isBest ? 'font-bold text-gray-900' : 'text-gray-600'}`}>
-                          {pts ?? '–'}
-                        </td>
-                      )
-                    })}
-                    <td className="px-3 py-2.5 text-right font-bold tabular-nums">{total}</td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-          <p className="text-xs text-gray-400 mt-2">Lihavoitu = turnauksen paras. Yht. = historian kokonaispisteet.</p>
+        <div className="mt-3">
+          <HistoryOverviewTable
+            comps={comps.map(c => ({ id: c.id }))}
+            players={overviewPlayers}
+            totals={compTotals}
+          />
         </div>
       </details>
     </div>
