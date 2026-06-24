@@ -93,6 +93,16 @@ All tables are in `supabase/migrations/`. Migrations 0001–0011 must be applied
 - `fs_requests` table — log of every Flashscore API call, enforces the 500/month hard limit
 - `streak_seeds` table — pre-tournament streak values per player per type; `unique(display_name, streak_type)`; `streak_type` in ('correct_5p','right_result','wrong_result','zero_p','non_zero_p','non_5p') (migration 0014)
 
+**Historical data tables** (read-only via RLS, written by import script):
+
+| Table | Purpose |
+|---|---|
+| `competitions` | One row per tournament: id (EM08, MM10…), name, type (EC/WC), year, host |
+| `hist_players` | Canonical player names + aliases array + optional link to live `profiles.id` |
+| `hist_matches` | Match results per competition; stage uses short codes (AL1–AL3, JPV, JV, JF) |
+| `hist_predictions` | Predictions + points per (match, player_name string) |
+| `hist_player_comp_stats` | VIEW: aggregated stats per (player_name, competition_id) — use this, not raw rows |
+
 **To mark yourself as admin** (run once in Supabase SQL editor after first login):
 ```sql
 UPDATE profiles SET is_admin = true WHERE email = 'your@email.fi';
@@ -118,6 +128,9 @@ app/
                           # group advance (wildcard for all tournament countries)
                           # confirmedBets state: persistent save indicator, unsaved-change warning
   settings/page.tsx       # Player self-service: display name, Telegram ID, chart color, clan
+  history/page.tsx        # Historical competition browser: stats table + tournament comparison matrix
+                          # Competition tabs (All / EM08 / MM10 / …); queries hist_player_comp_stats view
+  history/CompPicker.tsx  # Client component: competition tab pills, updates ?comp= URL param
   admin/
     layout.tsx            # Guards: redirect non-admins to /leaderboard
     page.tsx              # Admin dashboard links
@@ -127,7 +140,7 @@ app/
     categories/page.tsx   # Score special bets (champion, scorer, group advance)
 
 components/
-  Nav.tsx                 # Sticky top nav; ⚙ settings icon next to sign-out
+  Nav.tsx                 # Sticky top nav; desktop: all links inline; mobile: Pisteet+Ottelut always visible, hamburger dropdown for rest
   MatchCard.tsx           # Match display with prediction form / locked / result
   PredictionForm.tsx      # Score input (home : away), optimistic save
   CountdownTimer.tsx      # Client component, updates every 30s
@@ -199,6 +212,8 @@ supabase/
     0012_chat.sql                 # chat_messages table + RLS (read all, insert/delete own)
     0013_flashscore.sql           # fs_match_id + fs_xg_attempts on matches; fs_requests budget log
     0014_streaks_and_bets_posted.sql  # streak_seeds table + category_bets_posted on matches
+    0015_historical_data.sql          # competitions, hist_players, hist_matches, hist_predictions tables + RLS
+    0016_hist_stats_view.sql          # hist_player_comp_stats view: aggregated (player, competition) stats
   functions/
     poll-match-results/index.ts      # Deno: polls football-data.org, scores, fetches xG, sends result message (spoiler-formatted)
     check-upcoming-matches/index.ts  # Deno: sends reminder DMs + predictions-reveal group message
@@ -402,6 +417,15 @@ npm test           # vitest unit tests
 - Player-chosen chart colors (20-color palette, first-come-first-serve, stored in DB)
   - `lib/colors.ts`, `app/api/profile/color/route.ts`, migration 0010
   - Color picker in `/settings`
+
+### ✅ Phase 5f — Historical Data
+- **Schema** (migrations 0015–0016): `competitions`, `hist_players`, `hist_matches`, `hist_predictions`, `hist_player_comp_stats` view
+- **Import script** `scripts/import-historical.ts`: reads competition CSVs, resolves player names via canonical names + aliases, interactive dry-run before inserting. Usage: `npx tsx scripts/import-historical.ts <csv> <competition-id>`
+- **Player registry** (`hist_players`): canonical names linked to live `profiles` via `profile_id`; `aliases` array handles past names (e.g. Kranjech → Pepe Bonito). Add new aliases with `UPDATE hist_players SET aliases = aliases || '{"alias"}' WHERE canonical_name = '...'`
+- **Competitions imported**: EM08, MM10, EM12, MM14, EM16, MM18, EM20, EM24 (WC2026 will be archived here post-tournament)
+- **Stage codes** in hist_matches: `AL1/AL2/AL3` = group rounds, `JPV` = quarter-finals, `JV` = semi-finals, `JF` = final, `JNV` = final (alternate). GROUP_STAGES set = `{'AL1','AL2','AL3'}` used in view and page logic.
+- **`/history` page**: stats table (Pts, KA, Tark, Mrk%, Nol%, L-KA, J-KA) + Turnausvertailu matrix (player × competition). Queries `hist_player_comp_stats` view — never raw prediction rows (avoids Supabase 1000-row default limit). `?comp=EM08` filters stats table; matrix always shows all competitions.
+- **Nav**: mobile hamburger added; `Pisteet` and `Ottelut` always visible; all other links (incl. Historia) in dropdown.
 
 ### 🔲 Phase 6 — UI Polish
 - Responsive pass on all pages
