@@ -30,7 +30,7 @@ export default async function LeaderboardPage() {
     { data: firstMatch },
   ] = await Promise.all([
     supabase.from('profiles').select('id, display_name, chart_color').order('display_name'),
-    supabase.from('scoring_log').select('user_id, points, breakdown, match_id, matches(stage, kickoff_at)').order('match_id', { ascending: true }),
+    supabase.from('scoring_log').select('user_id, points, breakdown, match_id, matches(stage, kickoff_at, match_day)').order('match_id', { ascending: true }),
     supabase.from('category_bets').select('user_id, points, category').not('points', 'is', null),
     srSupabase.from('predictions').select('user_id, home_score_pred, away_score_pred, match_id, matches(home_score, away_score, status)'),
     supabase.from('matches').select('id, home_xg, away_xg').not('home_xg', 'is', null).not('away_xg', 'is', null),
@@ -234,6 +234,56 @@ export default async function LeaderboardPage() {
     chartData.push({ match: matchIndex, ...Object.fromEntries(Object.entries(running2)) })
     matchIndex++
   }
+  // Append bonus points as a final synthetic chart point when any player has scored bonus
+  const hasBonus = !categoryBetsOpen && sorted.some(x => x.bonus > 0)
+  if (hasBonus && chartData.length > 0) {
+    for (const s of sorted) {
+      if (s.bonus > 0) running2[s.display_name] = (running2[s.display_name] ?? 0) + s.bonus
+    }
+    chartData.push({ match: matchIndex, ...Object.fromEntries(Object.entries(running2)) })
+  }
+
+  // ── Per-round stats ────────────────────────────────────────────────────────
+
+  type RoundKey = string  // 'G1' | 'G2' | 'G3' | 'R16' | 'QF' | 'SF' | '3P' | 'F'
+  type RoundStats = { pts: number; n: number; exact: number }
+
+  const ROUND_ORDER: RoundKey[] = ['G1', 'G2', 'G3', 'R16', 'QF', 'SF', '3P', 'F']
+  const ROUND_LABEL: Record<RoundKey, string> = {
+    G1: 'Kierros 1', G2: 'Kierros 2', G3: 'Kierros 3',
+    R16: 'R16', QF: 'Puolivälierät', SF: 'Välierät', '3P': 'Pronssi', F: 'Finaali',
+  }
+
+  function roundKey(stage: string, matchDay: number | null): RoundKey {
+    if (stage === 'GROUP_STAGE') return `G${matchDay ?? 1}` as RoundKey
+    if (stage === 'ROUND_OF_16') return 'R16'
+    if (stage === 'QUARTER_FINALS') return 'QF'
+    if (stage === 'SEMI_FINALS') return 'SF'
+    if (stage === 'THIRD_PLACE') return '3P'
+    if (stage === 'FINAL') return 'F'
+    return stage as RoundKey
+  }
+
+  // per-player per-round stats
+  const roundStats: Record<string, Record<RoundKey, RoundStats>> = {}
+  const roundsSeen = new Set<RoundKey>()
+  for (const p of players) roundStats[p] = {}
+
+  for (const row of log ?? []) {
+    const name = profiles.find(p => p.id === row.user_id)?.display_name
+    if (!name || !roundStats[name]) continue
+    const m = Array.isArray(row.matches) ? row.matches[0] : row.matches
+    if (!m?.stage) continue
+    const rk = roundKey(m.stage, (m as Record<string, unknown>).match_day as number | null ?? null)
+    roundsSeen.add(rk)
+    if (!roundStats[name][rk]) roundStats[name][rk] = { pts: 0, n: 0, exact: 0 }
+    roundStats[name][rk].pts += row.points
+    roundStats[name][rk].n += 1
+    const b = row.breakdown as { result: number; home_goals: number; away_goals: number } | null
+    if (b && b.result === 3 && b.home_goals === 1 && b.away_goals === 1) roundStats[name][rk].exact += 1
+  }
+
+  const roundsToShow = ROUND_ORDER.filter(rk => roundsSeen.has(rk))
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -243,8 +293,6 @@ export default async function LeaderboardPage() {
   // ── Stats rows definition (transposed table) ────────────────────────────────
   // Serializable data for the client-side sortable table: each cell carries
   // the display string and a numeric value for sorting.
-
-  const hasBonus = !categoryBetsOpen && sorted.some(x => x.bonus > 0)
 
   const pctCell = (n: number, d: number) => ({ display: pct(n, d), num: d > 0 ? n / d * 100 : null })
   const pctNCell = (n: number, d: number) => ({ display: d > 0 ? `${pct(n, d)} (${d})` : '–', num: d > 0 ? n / d * 100 : null })
@@ -330,20 +378,77 @@ export default async function LeaderboardPage() {
           <PointsChart data={chartData} players={players} colors={playerColors} />
 
           {/* ── Stats table (transposed: stats = rows, players = columns) ── */}
-          {(
-            <div className="space-y-2">
-              <h2 className="text-lg font-semibold">Tilastot</h2>
-              <StatsTable rows={statRowDefs} players={statPlayers} />
+          <div className="space-y-2">
+            <h2 className="text-lg font-semibold">Tilastot</h2>
+            <StatsTable rows={statRowDefs} players={statPlayers} />
 
-              {/* Legend */}
-              <p className="text-xs text-gray-400 leading-relaxed">
-                Järjestä klikkaamalla tilastoriviä. ·
-                KA=pistekeskiarvo · Tark=täysosumat · Mrk%=oikeat merkit · Nol%=nollaottelut ·
-                L-KA=lohkovaihe KA · J-KA=jatkopelit KA · Tas%=tasurihakujen osuma ·
-                Yllätys%=oikea merkki kun ≤25% veikkasi samoin · Jht=päiviä johdossa
-                {hasXg ? ' · xG-Pts=xG:n mukainen pistetilanne' : ''}
-              </p>
-            </div>
+            {/* Legend */}
+            <p className="text-xs text-gray-400 leading-relaxed">
+              Järjestä klikkaamalla tilastoriviä. ·
+              KA=pistekeskiarvo · Tark=täysosumat · Mrk%=oikeat merkit · Nol%=nollaottelut ·
+              L-KA=lohkovaihe KA · J-KA=jatkopelit KA · Tas%=tasurihakujen osuma ·
+              Yllätys%=oikea merkki kun ≤25% veikkasi samoin · Jht=päiviä johdossa
+              {hasXg ? ' · xG-Pts=xG:n mukainen pistetilanne' : ''}
+            </p>
+          </div>
+
+          {/* ── Per-round stats ── */}
+          {roundsToShow.length > 0 && (
+            <details className="group">
+              <summary className="cursor-pointer list-none flex items-center gap-2 text-lg font-semibold select-none">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="16" height="16" viewBox="0 0 24 24"
+                  fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                  className="transition-transform group-open:rotate-90 text-gray-400"
+                >
+                  <polyline points="9 18 15 12 9 6" />
+                </svg>
+                Kierrostilastot
+              </summary>
+
+              <div className="mt-3 overflow-x-auto">
+                <table className="text-xs border-collapse w-full">
+                  <thead>
+                    <tr>
+                      <th className="text-left pr-4 py-1.5 font-medium text-gray-500 whitespace-nowrap sticky left-0 bg-white">Kierros</th>
+                      {sorted.map(s => (
+                        <th key={s.id} className="px-3 py-1.5 font-medium text-gray-700 text-center whitespace-nowrap">
+                          {s.display_name}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {roundsToShow.map(rk => {
+                      const rowVals = sorted.map(s => roundStats[s.display_name]?.[rk])
+                      const maxPts = Math.max(...rowVals.map(r => r?.pts ?? 0))
+                      return (
+                        <tr key={rk} className="hover:bg-gray-50">
+                          <td className="pr-4 py-2 font-medium text-gray-600 whitespace-nowrap sticky left-0 bg-white group-hover:bg-gray-50">
+                            {ROUND_LABEL[rk]}
+                          </td>
+                          {sorted.map(s => {
+                            const r = roundStats[s.display_name]?.[rk]
+                            if (!r) return <td key={s.id} className="px-3 py-2 text-center text-gray-300">–</td>
+                            const isTop = r.pts === maxPts && maxPts > 0
+                            return (
+                              <td key={s.id} className={`px-3 py-2 text-center tabular-nums ${isTop ? 'font-bold text-gray-900' : 'text-gray-700'}`}>
+                                <span>{r.pts}</span>
+                                <span className="text-gray-400 ml-0.5">
+                                  {' '}({(r.pts / r.n).toFixed(1).replace('.', ',')})
+                                </span>
+                              </td>
+                            )
+                          })}
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+                <p className="text-xs text-gray-400 mt-2">Pisteet (KA per ottelu). Lihavoitu = kierroksen paras.</p>
+              </div>
+            </details>
           )}
         </>
       )}
