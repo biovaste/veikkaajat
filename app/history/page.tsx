@@ -2,6 +2,7 @@ import { createServerClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { Suspense } from 'react'
 import CompPicker from './CompPicker'
+import HistoryStatsTable from './HistoryStatsTable'
 
 export const dynamic = 'force-dynamic'
 
@@ -19,8 +20,6 @@ interface CompStat {
   knockout_n: number
 }
 
-const pct = (n: number, d: number) => d > 0 ? `${Math.round(n / d * 100)}%` : '–'
-const avg = (p: number, n: number) => n > 0 ? (p / n).toFixed(2).replace('.', ',') : '–'
 
 export default async function HistoryPage({
   searchParams,
@@ -34,10 +33,16 @@ export default async function HistoryPage({
   const { comp } = await searchParams
   const selectedComp = comp ?? 'all'
 
-  const [{ data: competitions }, { data: rawStats }] = await Promise.all([
+  const [{ data: competitions }, { data: rawStats }, { data: histPlayers }] = await Promise.all([
     supabase.from('competitions').select('id, name, type, year').order('year'),
     supabase.from('hist_player_comp_stats').select('*'),
+    supabase.from('hist_players').select('canonical_name, profile_id'),
   ])
+
+  // Players with a profile_id are active in the current app (WC2026)
+  const activePlayers = new Set(
+    (histPlayers ?? []).filter(p => p.profile_id).map(p => p.canonical_name)
+  )
 
   const comps = competitions ?? []
   const allStats = (rawStats ?? []) as CompStat[]
@@ -70,7 +75,7 @@ export default async function HistoryPage({
   }
 
   const stats = [...byPlayer.entries()]
-    .map(([name, s]) => ({ name, ...s }))
+    .map(([name, s]) => ({ name, active: activePlayers.has(name), ...s }))
     .sort((a, b) => b.total - a.total || b.exact - a.exact)
 
   // ── Tournament overview matrix ────────────────────────────────────────────
@@ -105,43 +110,7 @@ export default async function HistoryPage({
       ) : (
         <div className="space-y-2">
           <h2 className="text-lg font-semibold">Tilastot</h2>
-          <div className="overflow-x-auto">
-            <table className="text-sm border-collapse w-full">
-              <thead>
-                <tr className="border-b border-gray-200">
-                  <th className="text-left py-2 pr-2 font-medium text-gray-500">#</th>
-                  <th className="text-left py-2 pr-4 font-medium text-gray-500">Pelaaja</th>
-                  <th className="text-right px-3 py-2 font-medium text-gray-500">Pts</th>
-                  <th className="text-right px-3 py-2 font-medium text-gray-500">KA</th>
-                  <th className="text-right px-3 py-2 font-medium text-gray-500">Tark</th>
-                  <th className="text-right px-3 py-2 font-medium text-gray-500">Mrk%</th>
-                  <th className="text-right px-3 py-2 font-medium text-gray-500">Nol%</th>
-                  <th className="text-right px-3 py-2 font-medium text-gray-500">L-KA</th>
-                  <th className="text-right px-3 py-2 font-medium text-gray-500">J-KA</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {stats.map((s, i) => (
-                  <tr key={s.name} className={i === 0 ? 'bg-yellow-50' : 'hover:bg-gray-50'}>
-                    <td className="py-2.5 pr-2 text-gray-400 font-medium">
-                      {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : i + 1}
-                    </td>
-                    <td className="py-2.5 pr-4 font-medium">{s.name}</td>
-                    <td className="px-3 py-2.5 text-right font-bold tabular-nums">{s.total}</td>
-                    <td className="px-3 py-2.5 text-right tabular-nums text-gray-700">{avg(s.total, s.preds)}</td>
-                    <td className="px-3 py-2.5 text-right tabular-nums text-gray-700">{s.exact}</td>
-                    <td className="px-3 py-2.5 text-right tabular-nums text-gray-700">{pct(s.correct, s.preds)}</td>
-                    <td className="px-3 py-2.5 text-right tabular-nums text-gray-700">{pct(s.zero, s.preds)}</td>
-                    <td className="px-3 py-2.5 text-right tabular-nums text-gray-700">{avg(s.group_pts, s.group_n)}</td>
-                    <td className="px-3 py-2.5 text-right tabular-nums text-gray-700">{avg(s.knockout_pts, s.knockout_n)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <p className="text-xs text-gray-400">
-            KA=pistekeskiarvo · Tark=täysosumat · Mrk%=oikeat merkit · Nol%=nollaottelut · L-KA=lohkovaihe KA · J-KA=jatkopelit KA
-          </p>
+          <HistoryStatsTable rows={stats} />
         </div>
       )}
 
