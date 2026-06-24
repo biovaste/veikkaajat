@@ -64,6 +64,15 @@ export default function HistoryStatsTable({ rows }: { rows: HistoryPlayerRow[] }
     }
   }
 
+  function getTooltip(r: HistoryPlayerRow, key: SortKey): string | undefined {
+    switch (key) {
+      case 'tark_pct': return r.preds > 0 ? `${r.exact}/${r.preds}` : undefined
+      case 'mrk':      return r.preds > 0 ? `${r.correct}/${r.preds}` : undefined
+      case 'nol':      return r.preds > 0 ? `${r.zero}/${r.preds}` : undefined
+      default:         return undefined
+    }
+  }
+
   const visible = hideInactive ? rows.filter(r => r.active) : rows
 
   const sorted = [...visible].sort((a, b) => {
@@ -147,9 +156,10 @@ export default function HistoryStatsTable({ rows }: { rows: HistoryPlayerRow[] }
                 {columns.map(col => (
                   <td
                     key={col.key}
+                    title={getTooltip(r, col.key)}
                     className={`px-3 py-2.5 text-right tabular-nums ${
                       col.key === 'total' ? 'font-bold' : 'text-gray-700'
-                    } ${sortKey === col.key ? 'bg-blue-50/50' : ''}`}
+                    } ${sortKey === col.key ? 'bg-blue-50/50' : ''} ${getTooltip(r, col.key) ? 'cursor-help' : ''}`}
                   >
                     {getDisplay(r, col.key)}
                   </td>
