@@ -5,68 +5,18 @@ import CompPicker from './CompPicker'
 
 export const dynamic = 'force-dynamic'
 
-interface HMatch {
-  id: number
-  competition_id: string
-  stage: string
-  home_goals: number | null
-  away_goals: number | null
-  result_sign: string | null
-}
-
-interface HPred {
-  match_id: number
+interface CompStat {
   player_name: string
-  home_pred: number | null
-  away_pred: number | null
-  sign_pred: string | null
-  points: number | null
-}
-
-interface PlayerStats {
-  name: string
-  total: number
+  competition_id: string
   preds: number
-  exact: number
-  correct: number
-  zero: number
-  group_pts: number; group_n: number
-  knockout_pts: number; knockout_n: number
-}
-
-// Stage codes used in hist_matches
-const GROUP_STAGES = new Set(['AL1', 'AL2', 'AL3'])
-
-function emptyStats(name: string): PlayerStats {
-  return { name, total: 0, preds: 0, exact: 0, correct: 0, zero: 0, group_pts: 0, group_n: 0, knockout_pts: 0, knockout_n: 0 }
-}
-
-function computeStats(matches: HMatch[], preds: HPred[]): PlayerStats[] {
-  const matchById = new Map(matches.map(m => [m.id, m]))
-  const byPlayer = new Map<string, PlayerStats>()
-
-  for (const p of preds) {
-    if (!byPlayer.has(p.player_name)) byPlayer.set(p.player_name, emptyStats(p.player_name))
-    const s = byPlayer.get(p.player_name)!
-    const m = matchById.get(p.match_id)
-    if (!m || m.home_goals === null) continue
-
-    const pts = p.points ?? 0
-    s.total += pts
-    s.preds += 1
-    if (pts === 0) s.zero += 1
-    if (p.sign_pred === m.result_sign) s.correct += 1
-    if (
-      p.sign_pred === m.result_sign &&
-      p.home_pred === m.home_goals &&
-      p.away_pred === m.away_goals
-    ) s.exact += 1
-
-    if (GROUP_STAGES.has(m.stage)) { s.group_pts += pts; s.group_n += 1 }
-    else { s.knockout_pts += pts; s.knockout_n += 1 }
-  }
-
-  return [...byPlayer.values()].sort((a, b) => b.total - a.total || b.exact - a.exact)
+  total_pts: number
+  zero_count: number
+  correct_results: number
+  exact_count: number
+  group_pts: number
+  group_n: number
+  knockout_pts: number
+  knockout_n: number
 }
 
 const pct = (n: number, d: number) => d > 0 ? `${Math.round(n / d * 100)}%` : '–'
@@ -84,43 +34,57 @@ export default async function HistoryPage({
   const { comp } = await searchParams
   const selectedComp = comp ?? 'all'
 
-  const [
-    { data: competitions },
-    { data: allMatches },
-    { data: allPreds },
-  ] = await Promise.all([
+  const [{ data: competitions }, { data: rawStats }] = await Promise.all([
     supabase.from('competitions').select('id, name, type, year').order('year'),
-    supabase.from('hist_matches').select('id, competition_id, stage, home_goals, away_goals, result_sign').limit(10000),
-    supabase.from('hist_predictions').select('match_id, player_name, home_pred, away_pred, sign_pred, points').limit(10000),
+    supabase.from('hist_player_comp_stats').select('*'),
   ])
 
   const comps = competitions ?? []
-  const matches = (allMatches ?? []) as HMatch[]
-  const preds = (allPreds ?? []) as HPred[]
+  const allStats = (rawStats ?? []) as CompStat[]
 
-  // Filter to selected competition
-  const filteredMatches = selectedComp === 'all'
-    ? matches
-    : matches.filter(m => m.competition_id === selectedComp)
+  // ── Stats table: aggregate across selected competition(s) ─────────────────
+  const filtered = selectedComp === 'all'
+    ? allStats
+    : allStats.filter(r => r.competition_id === selectedComp)
 
-  const filteredMatchIds = new Set(filteredMatches.map(m => m.id))
-  const filteredPreds = preds.filter(p => filteredMatchIds.has(p.match_id))
+  const byPlayer = new Map<string, {
+    total: number; preds: number; exact: number; correct: number; zero: number
+    group_pts: number; group_n: number; knockout_pts: number; knockout_n: number
+  }>()
 
-  const stats = computeStats(filteredMatches, filteredPreds)
-
-  // Tournament overview: player → competition → total points
-  const allPlayers = [...new Set(preds.map(p => p.player_name))].sort()
-  const compTotals: Record<string, Record<string, number>> = {}
-  for (const p of preds) {
-    const m = matches.find(m => m.id === p.match_id)
-    if (!m) continue
-    if (!compTotals[p.player_name]) compTotals[p.player_name] = {}
-    compTotals[p.player_name][m.competition_id] =
-      (compTotals[p.player_name][m.competition_id] ?? 0) + (p.points ?? 0)
+  for (const r of filtered) {
+    const s = byPlayer.get(r.player_name) ?? {
+      total: 0, preds: 0, exact: 0, correct: 0, zero: 0,
+      group_pts: 0, group_n: 0, knockout_pts: 0, knockout_n: 0,
+    }
+    s.total      += Number(r.total_pts)
+    s.preds      += Number(r.preds)
+    s.exact      += Number(r.exact_count)
+    s.correct    += Number(r.correct_results)
+    s.zero       += Number(r.zero_count)
+    s.group_pts  += Number(r.group_pts)
+    s.group_n    += Number(r.group_n)
+    s.knockout_pts += Number(r.knockout_pts)
+    s.knockout_n += Number(r.knockout_n)
+    byPlayer.set(r.player_name, s)
   }
-  // Sort players by all-time total descending
-  const allTimeTotal = (name: string) => Object.values(compTotals[name] ?? {}).reduce((a, b) => a + b, 0)
-  const overviewPlayers = allPlayers.sort((a, b) => allTimeTotal(b) - allTimeTotal(a))
+
+  const stats = [...byPlayer.entries()]
+    .map(([name, s]) => ({ name, ...s }))
+    .sort((a, b) => b.total - a.total || b.exact - a.exact)
+
+  // ── Tournament overview matrix ────────────────────────────────────────────
+  const compTotals: Record<string, Record<string, number>> = {}
+  for (const r of allStats) {
+    if (!compTotals[r.player_name]) compTotals[r.player_name] = {}
+    compTotals[r.player_name][r.competition_id] = Number(r.total_pts)
+  }
+
+  const allTimeTotal = (name: string) =>
+    Object.values(compTotals[name] ?? {}).reduce((a, b) => a + b, 0)
+
+  const overviewPlayers = [...new Set(allStats.map(r => r.player_name))]
+    .sort((a, b) => allTimeTotal(b) - allTimeTotal(a))
 
   const selectedName = comps.find(c => c.id === selectedComp)?.name ?? 'Kaikki turnaukset'
 
@@ -145,8 +109,8 @@ export default async function HistoryPage({
             <table className="text-sm border-collapse w-full">
               <thead>
                 <tr className="border-b border-gray-200">
-                  <th className="text-left py-2 pr-4 font-medium text-gray-500 whitespace-nowrap">#</th>
-                  <th className="text-left py-2 pr-4 font-medium text-gray-500 whitespace-nowrap">Pelaaja</th>
+                  <th className="text-left py-2 pr-2 font-medium text-gray-500">#</th>
+                  <th className="text-left py-2 pr-4 font-medium text-gray-500">Pelaaja</th>
                   <th className="text-right px-3 py-2 font-medium text-gray-500">Pts</th>
                   <th className="text-right px-3 py-2 font-medium text-gray-500">KA</th>
                   <th className="text-right px-3 py-2 font-medium text-gray-500">Tark</th>
@@ -159,7 +123,7 @@ export default async function HistoryPage({
               <tbody className="divide-y divide-gray-100">
                 {stats.map((s, i) => (
                   <tr key={s.name} className={i === 0 ? 'bg-yellow-50' : 'hover:bg-gray-50'}>
-                    <td className="py-2.5 pr-4 text-gray-400 font-medium">
+                    <td className="py-2.5 pr-2 text-gray-400 font-medium">
                       {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : i + 1}
                     </td>
                     <td className="py-2.5 pr-4 font-medium">{s.name}</td>
@@ -184,12 +148,9 @@ export default async function HistoryPage({
       {/* ── Tournament overview matrix ── */}
       <details className="group" open={selectedComp === 'all'}>
         <summary className="cursor-pointer list-none flex items-center gap-2 text-lg font-semibold select-none">
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="16" height="16" viewBox="0 0 24 24"
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
             fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-            className="transition-transform group-open:rotate-90 text-gray-400"
-          >
+            className="transition-transform group-open:rotate-90 text-gray-400">
             <polyline points="9 18 15 12 9 6" />
           </svg>
           Turnausvertailu
@@ -214,14 +175,10 @@ export default async function HistoryPage({
                     <td className="py-2.5 pr-6 font-medium sticky left-0 bg-inherit">{name}</td>
                     {comps.map(c => {
                       const pts = compTotals[name]?.[c.id]
-                      // Best in this competition
                       const compBest = Math.max(...overviewPlayers.map(n => compTotals[n]?.[c.id] ?? 0))
                       const isBest = pts !== undefined && pts === compBest
                       return (
-                        <td
-                          key={c.id}
-                          className={`px-3 py-2.5 text-right tabular-nums ${isBest ? 'font-bold text-gray-900' : 'text-gray-600'}`}
-                        >
+                        <td key={c.id} className={`px-3 py-2.5 text-right tabular-nums ${isBest ? 'font-bold text-gray-900' : 'text-gray-600'}`}>
                           {pts ?? '–'}
                         </td>
                       )
