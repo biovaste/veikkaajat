@@ -4,7 +4,6 @@ import { getCountry } from '../countries'
 import { isWildcard, wildcardCountry } from '../players'
 import { calculatePoints } from '../scoring/engine'
 import { assignColors } from '../colors'
-import { fetchDayOdds, lookupOdds } from '../therundown/client'
 
 const GROUP_CHAT_ID = process.env.TELEGRAM_GROUP_CHAT_ID!
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? ''
@@ -582,10 +581,10 @@ export async function sendOddsReport(chatId?: number | string): Promise<void> {
   const target = String(chatId ?? GROUP_CHAT_ID)
   const db = createServiceRoleClient()
 
-  // All finished matches
+  // All finished matches with stored odds
   const { data: matches } = await db
     .from('matches')
-    .select('id, home_team, away_team, kickoff_at, home_score, away_score')
+    .select('id, home_team, away_team, kickoff_at, home_score, away_score, home_odds, draw_odds, away_odds')
     .eq('status', 'FINISHED')
     .order('kickoff_at', { ascending: true })
 
@@ -594,20 +593,12 @@ export async function sendOddsReport(chatId?: number | string): Promise<void> {
     return
   }
 
-  // Fetch TheRundown odds grouped by UTC date (one request per day)
-  const oddsCache = new Map<string, Awaited<ReturnType<typeof fetchDayOdds>>>()
-  const uniqueDates = [...new Set(matches.map((m) => m.kickoff_at.slice(0, 10)))]
-  await Promise.all(
-    uniqueDates.map(async (d) => {
-      try { oddsCache.set(d, await fetchDayOdds(d)) } catch { /* skip */ }
-    }),
-  )
-
   function getMatchOdds(m: NonNullable<typeof matches>[0]) {
-    const dayMap = oddsCache.get(m.kickoff_at.slice(0, 10))
-    if (!dayMap) return null
-    return lookupOdds(dayMap, m.home_team, m.away_team)
+    if (m.home_odds == null || m.draw_odds == null || m.away_odds == null) return null
+    return { homeWin: Number(m.home_odds), draw: Number(m.draw_odds), awayWin: Number(m.away_odds) }
   }
+
+  const uniqueDates = [...new Set(matches.map((m) => m.kickoff_at.slice(0, 10)))]
 
   // All predictions on finished matches
   const matchIds = matches.map((m) => m.id)
@@ -691,7 +682,7 @@ export async function sendOddsReport(chatId?: number | string): Promise<void> {
     `<pre>${table}</pre>\n` +
     `<i>KA-k = veikkauksen kerroin keskimäärin\n` +
     `ROI = tuotto per veikkaus (1 yksikön panos)\n` +
-    `${matches.length} ottelua · ${uniqueMatchDates} päivää haettu</i>`
+    `${matches.length} ottelua · ${uniqueMatchDates} ottelupäivää</i>`
 
   await sendMessage(target, text)
 }

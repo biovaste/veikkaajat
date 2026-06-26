@@ -168,7 +168,7 @@ export default async function LeaderboardPage() {
         if (xg) {
           const { total } = calculatePoints(
             { home: row.home_score_pred, away: row.away_score_pred },
-            { home: Math.round(xg.home_xg), away: Math.round(xg.away_xg) },
+            { home: Math.floor(xg.home_xg / 0.75), away: Math.floor(xg.away_xg / 0.75) },
           )
           s.xg_pts += total
           s.xg_n += 1

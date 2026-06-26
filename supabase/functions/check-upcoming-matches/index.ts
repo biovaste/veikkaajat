@@ -4,6 +4,7 @@
 // - Sends predictions-reveal group message when betting closes (5 min before kickoff)
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { getPreMatchStat } from '../_shared/prematch-stat.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -11,6 +12,7 @@ const BOT_TOKEN = Deno.env.get('TELEGRAM_BOT_TOKEN')!
 const GROUP_CHAT_ID = Deno.env.get('TELEGRAM_GROUP_CHAT_ID')!
 const APP_URL = Deno.env.get('NEXT_PUBLIC_APP_URL') ?? ''
 const RAPIDAPI_KEY = Deno.env.get('RAPIDAPI_KEY') ?? ''
+const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY') ?? ''
 
 // ─── TheRundown odds ──────────────────────────────────────────────────────────
 
@@ -28,6 +30,8 @@ const NAME_ALIASES: Record<string, string> = {
   'republic of ireland': 'ireland',
   'dr congo': 'congo dr',
   'cape verde islands': 'cape verde',
+  'bosnia-herzegovina': 'bosnia and herzegovina',
+  'turkiye': 'turkey',
 }
 
 function normalizeName(s: string): string {
@@ -315,12 +319,14 @@ Deno.serve(async (_req) => {
   const deadlinePassed = new Date(now.getTime() + 5 * 60 * 1000)
   const catchUpWindow = new Date(now.getTime() - 60 * 60 * 1000)
 
-  const { data: kMatches } = await db
-    .from('matches')
-    .select('id, home_team, away_team, kickoff_at, category_bets_posted, group_name')
-    .eq('kickoff_msg_sent', false)
-    .lte('kickoff_at', deadlinePassed.toISOString())
-    .gte('kickoff_at', catchUpWindow.toISOString())
+  const [{ data: kMatches }, { data: allPlayers }] = await Promise.all([
+    db.from('matches')
+      .select('id, home_team, away_team, kickoff_at, stage, category_bets_posted, group_name')
+      .eq('kickoff_msg_sent', false)
+      .lte('kickoff_at', deadlinePassed.toISOString())
+      .gte('kickoff_at', catchUpWindow.toISOString()),
+    db.from('profiles').select('id, display_name'),
+  ])
 
   // Fetch odds once per date covering all today's kickoff matches
   const oddsCache = new Map<string, Map<string, MatchOdds>>()
@@ -337,28 +343,50 @@ Deno.serve(async (_req) => {
       .select('user_id, home_score_pred, away_score_pred, profiles(display_name)')
       .eq('match_id', match.id)
 
-    // All players
-    const { data: allPlayers } = await db.from('profiles').select('id, display_name')
-
     const predictedIds = new Set((preds ?? []).map((p) => p.user_id))
     const notPredicted = (allPlayers ?? [])
       .filter((p) => !predictedIds.has(p.id))
       .map((p) => p.display_name)
 
-    const predLines = (preds ?? []).map((p) => {
-      const name = (Array.isArray(p.profiles) ? p.profiles[0] : p.profiles)?.display_name ?? '?'
-      return `${name}: ${p.home_score_pred}–${p.away_score_pred}`
-    })
+    const normalizedPreds = (preds ?? []).map((p) => ({
+      display_name: (Array.isArray(p.profiles) ? p.profiles[0] : p.profiles)?.display_name ?? '?',
+      home_score_pred: p.home_score_pred,
+      away_score_pred: p.away_score_pred,
+    }))
+
+    // Group predictions by result sign (home win / draw / away win), then by scoreline
+    type PredGroup = { home: number; away: number; players: string[] }
+    const homeWins: PredGroup[] = [], draws: PredGroup[] = [], awayWins: PredGroup[] = []
+    for (const p of normalizedPreds) {
+      const [h, a] = [p.home_score_pred, p.away_score_pred]
+      const bucket = h > a ? homeWins : h === a ? draws : awayWins
+      const existing = bucket.find(g => g.home === h && g.away === a)
+      if (existing) existing.players.push(p.display_name)
+      else bucket.push({ home: h, away: a, players: [p.display_name] })
+    }
+    const sortBucket = (gs: PredGroup[]) => gs.sort((a, b) => b.home - a.home || a.away - b.away)
+    sortBucket(homeWins); sortBucket(draws); sortBucket(awayWins)
+    const formatBucket = (emoji: string, gs: PredGroup[]) =>
+      gs.map(g => `${emoji} ${g.home}–${g.away}: ${g.players.join(', ')}`).join('\n')
+    const predLines = [
+      formatBucket('🏠', homeWins),
+      formatBucket('🤝', draws),
+      formatBucket('✈️', awayWins),
+    ].filter(Boolean)
 
     const channel = getFiChannel(match.home_team, match.away_team)
     const dayOdds = await getOdds(match.kickoff_at)
     const odds = dayOdds.get(`${normalizeName(match.home_team)}|${normalizeName(match.away_team)}`)
 
+    const funStat = await getPreMatchStat(db, ANTHROPIC_API_KEY, match.home_team, match.away_team, match.stage ?? 'GROUP_STAGE', normalizedPreds)
+
     let text = `🔔 <b>${match.home_team} – ${match.away_team}</b>\n`
     if (channel) text += `📺 ${channel}\n`
     if (odds) text += `📊 Kertoimet: K ${odds.homeWin} · T ${odds.draw} · V ${odds.awayWin}\n`
+    if (funStat) text += `💡 <i>${funStat}</i>\n`
     text += `\n<b>Veikkaukset:</b>\n`
     if (predLines.length) text += predLines.join('\n') + '\n'
+
     if (notPredicted.length) text += `\n<i>Ei veikannut: ${notPredicted.join(', ')}</i>`
 
     const error = await tgSend(GROUP_CHAT_ID, text)
@@ -366,7 +394,10 @@ Deno.serve(async (_req) => {
 
     // Only mark sent if Telegram accepted the message, so failures retry next run
     if (!error) {
-      await db.from('matches').update({ kickoff_msg_sent: true }).eq('id', match.id)
+      await db.from('matches').update({
+        kickoff_msg_sent: true,
+        ...(odds ? { home_odds: odds.homeWin, draw_odds: odds.draw, away_odds: odds.awayWin } : {}),
+      }).eq('id', match.id)
     }
 
     // ── Post special bets when their deadline closes ──────────────────────────

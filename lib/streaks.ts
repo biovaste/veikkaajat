@@ -25,20 +25,21 @@ function meetsCondition(type: StreakType, points: number, breakdown: { result: n
   }
 }
 
+
 export async function computeStreaks(admin: SupabaseClient): Promise<PlayerStreaks[]> {
   const [{ data: profiles }, { data: log }, { data: seeds }] = await Promise.all([
     admin.from('profiles').select('id, display_name').order('display_name'),
     admin.from('scoring_log')
       .select('user_id, points, breakdown, match_id, matches(kickoff_at)')
       .order('match_id', { ascending: true }),
-    admin.from('streak_seeds').select('display_name, streak_type, current'),
+    admin.from('streak_seeds').select('display_name, streak_type, current, hist_best'),
   ])
 
-  // Seed lookup: display_name → streak_type → current
-  const seedMap: Record<string, Record<string, number>> = {}
+  // Seed lookup: display_name → streak_type → { current, hist_best }
+  const seedMap: Record<string, Record<string, { current: number; hist_best: number }>> = {}
   for (const s of seeds ?? []) {
     if (!seedMap[s.display_name]) seedMap[s.display_name] = {}
-    seedMap[s.display_name][s.streak_type] = s.current
+    seedMap[s.display_name][s.streak_type] = { current: s.current ?? 0, hist_best: s.hist_best ?? 0 }
   }
 
   const result: PlayerStreaks[] = []
@@ -60,9 +61,10 @@ export async function computeStreaks(admin: SupabaseClient): Promise<PlayerStrea
     const playerSeeds = seedMap[profile.display_name] ?? {}
 
     for (const type of STREAK_TYPES) {
-      const seedCurrent = playerSeeds[type] ?? 0
-      let current = seedCurrent
-      let best = seedCurrent
+      const seed = playerSeeds[type] ?? { current: 0, hist_best: 0 }
+      let current = seed.current
+      // best starts at max of all-time historical best and the current ongoing streak (seed)
+      let best = Math.max(seed.current, seed.hist_best)
 
       for (const game of playerLog) {
         if (meetsCondition(type, game.points, game.breakdown)) {
