@@ -25,8 +25,8 @@ export async function POST(request: NextRequest) {
       stage: m.stage,
       group_name: m.group ?? null,
       match_day: m.matchday ?? null,
-      home_team: m.homeTeam.name,
-      away_team: m.awayTeam.name,
+      home_team: m.homeTeam.name ?? 'TBD',
+      away_team: m.awayTeam.name ?? 'TBD',
       kickoff_at: m.utcDate,
       status: m.status,
     }))
