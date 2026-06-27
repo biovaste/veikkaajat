@@ -162,6 +162,7 @@ export async function sendStatsTable(chatId?: number | string): Promise<void> {
     yllatys_correct: number; yllatys_total: number
     lead_count: number
     xg_pts: number; xg_n: number
+    trend_pts: number; trend_n: number
     champion_bet: string | null
     scorer_bet: string | null
   }
@@ -175,11 +176,13 @@ export async function sendStatsTable(chatId?: number | string): Promise<void> {
       draw_preds: 0, draw_correct: 0, yllatys_correct: 0, yllatys_total: 0,
       lead_count: 0,
       xg_pts: 0, xg_n: 0,
+      trend_pts: 0, trend_n: 0,
       champion_bet: null, scorer_bet: null,
     }
   }
 
   // Match points from scoring_log
+  const perPlayerMatchPts: Record<string, number[]> = {}
   for (const row of log ?? []) {
     const s = stats[row.user_id]
     if (!s) continue
@@ -192,6 +195,16 @@ export async function sendStatsTable(chatId?: number | string): Promise<void> {
     const stage = (Array.isArray(row.matches) ? row.matches[0] : row.matches)?.stage
     if (stage === 'GROUP_STAGE') { s.group_pts += row.points; s.group_n += 1 }
     else if (stage) { s.knockout_pts += row.points; s.knockout_n += 1 }
+    if (!perPlayerMatchPts[row.user_id]) perPlayerMatchPts[row.user_id] = []
+    perPlayerMatchPts[row.user_id].push(row.points)
+  }
+  // Trend: average of last 3 match predictions
+  for (const [uid, pts] of Object.entries(perPlayerMatchPts)) {
+    const last3 = pts.slice(-3)
+    const s = stats[uid]
+    if (!s) continue
+    s.trend_pts = last3.reduce((a, b) => a + b, 0)
+    s.trend_n = last3.length
   }
 
   // Leadership: count calendar days (Helsinki, UTC+3) each player led at end of day
@@ -269,12 +282,12 @@ export async function sendStatsTable(chatId?: number | string): Promise<void> {
       // Draw accuracy
       if (pred_sign === 0) { s.draw_preds++; if (actual_sign === 0) s.draw_correct++ }
 
-      // xG-based points: recalculate using rounded xG as the "actual" result
+      // xG-based points: recalculate using 0.75xg=1 goal conversion
       const xg = xgByMatch[row.match_id]
       if (xg) {
         const { total } = calculatePoints(
           { home: row.home_score_pred, away: row.away_score_pred },
-          { home: Math.round(xg.home_xg), away: Math.round(xg.away_xg) },
+          { home: Math.floor(xg.home_xg / 0.75), away: Math.floor(xg.away_xg / 0.75) },
         )
         s.xg_pts += total
         s.xg_n += 1
@@ -333,6 +346,7 @@ export async function sendStatsTable(chatId?: number | string): Promise<void> {
     { key: 'tas', label: 'Tas%' },
     { key: 'yll', label: 'Yllätys%' },
     { key: 'jht', label: 'Jht' },
+    { key: 'trendi', label: 'Trendi' },
     ...(hasXg ? [{ key: 'xg', label: 'xG-Pts' }] : []),
     ...(hasBonus ? [{ key: 'bonus', label: 'Bonus' }] : []),
     ...(hasPicks ? [
@@ -354,6 +368,7 @@ export async function sendStatsTable(chatId?: number | string): Promise<void> {
       tas: pctNCell(s.draw_correct, s.draw_preds),
       yll: pctNCell(s.yllatys_correct, s.yllatys_total),
       jht: numCell(s.lead_count),
+      trendi: s.trend_n > 0 ? avgCell(s.trend_pts, s.trend_n) : { display: '–', num: null },
       ...(hasXg ? { xg: s.xg_n > 0 ? numCell(s.xg_pts) : { display: '–', num: null } } : {}),
       ...(hasBonus ? { bonus: s.bonus > 0 ? { display: `+${s.bonus}`, num: s.bonus } : { display: '–', num: null } } : {}),
       ...(hasPicks ? {

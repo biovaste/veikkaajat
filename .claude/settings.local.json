@@ -89,7 +89,13 @@
       "mcp__00b64788-5d2b-4f44-a45c-8efe4ac6a555__apply_migration",
       "mcp__00b64788-5d2b-4f44-a45c-8efe4ac6a555__deploy_edge_function",
       "mcp__00b64788-5d2b-4f44-a45c-8efe4ac6a555__execute_sql",
-      "Bash(curl -s -X POST \"https://coasklygmrpolgtssjnj.supabase.co/functions/v1/post-group-bets-once\")"
+      "Bash(curl -s -X POST \"https://coasklygmrpolgtssjnj.supabase.co/functions/v1/post-group-bets-once\")",
+      "Bash(npx supabase *)",
+      "mcp__visualize__read_me",
+      "mcp__visualize__show_widget",
+      "mcp__00b64788-5d2b-4f44-a45c-8efe4ac6a555__list_tables",
+      "mcp__00b64788-5d2b-4f44-a45c-8efe4ac6a555__get_logs",
+      "mcp__00b64788-5d2b-4f44-a45c-8efe4ac6a555__list_migrations"
     ]
   }
 }

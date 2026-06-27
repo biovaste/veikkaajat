@@ -65,6 +65,7 @@ export default async function LeaderboardPage() {
     yllatys_correct: number; yllatys_total: number
     lead_count: number
     xg_pts: number; xg_n: number
+    trend_pts: number; trend_n: number
   }
 
   const stats: Record<string, PlayerStats> = {}
@@ -76,10 +77,12 @@ export default async function LeaderboardPage() {
       group_pts: 0, group_n: 0, knockout_pts: 0, knockout_n: 0,
       draw_preds: 0, draw_correct: 0, yllatys_correct: 0, yllatys_total: 0,
       lead_count: 0, xg_pts: 0, xg_n: 0,
+      trend_pts: 0, trend_n: 0,
     }
   }
 
   // Match points
+  const perPlayerMatchPts: Record<string, number[]> = {}
   for (const row of log ?? []) {
     const s = stats[row.user_id]
     if (!s) continue
@@ -93,6 +96,16 @@ export default async function LeaderboardPage() {
     const m = Array.isArray(row.matches) ? row.matches[0] : row.matches
     if (m?.stage === 'GROUP_STAGE') { s.group_pts += row.points; s.group_n += 1 }
     else if (m?.stage) { s.knockout_pts += row.points; s.knockout_n += 1 }
+    if (!perPlayerMatchPts[row.user_id]) perPlayerMatchPts[row.user_id] = []
+    perPlayerMatchPts[row.user_id].push(row.points)
+  }
+  // Trend: average of last 3 match predictions
+  for (const [uid, pts] of Object.entries(perPlayerMatchPts)) {
+    const last3 = pts.slice(-3)
+    const s = stats[uid]
+    if (!s) continue
+    s.trend_pts = last3.reduce((a, b) => a + b, 0)
+    s.trend_n = last3.length
   }
 
   // Category bonus
@@ -310,7 +323,8 @@ export default async function LeaderboardPage() {
     { key: 'jka',  label: 'J-KA',     title: 'Jatkopelit KA' },
     { key: 'tas',  label: 'Tas%',     title: 'Tasurihakujen osuma %' },
     { key: 'yll',  label: 'Yllätys%', title: 'Oikea merkki kun ≤25% veikkasi samoin' },
-    { key: 'jht',  label: 'Jht',      title: 'Päiviä johdossa' },
+    { key: 'jht',    label: 'Jht',      title: 'Päiviä johdossa' },
+    { key: 'trendi', label: 'Trendi',   title: 'Viimeisen 3 ottelun pistekeskiarvo' },
     ...(hasXg ? [{ key: 'xg', label: 'xG-Pts', title: 'xG:n mukainen pistetilanne' }] : []),
     ...(hasBonus ? [{ key: 'bonus', label: 'Bonus', title: 'Erikoisveikkausten bonus' }] : []),
   ]
@@ -330,6 +344,7 @@ export default async function LeaderboardPage() {
       tas: pctNCell(s.draw_correct, s.draw_preds),
       yll: pctNCell(s.yllatys_correct, s.yllatys_total),
       jht: numCell(s.lead_count),
+      trendi: s.trend_n > 0 ? avgCell(s.trend_pts, s.trend_n) : { display: '–', num: null },
       ...(hasXg ? { xg: s.xg_n > 0 ? numCell(s.xg_pts) : { display: '–', num: null } } : {}),
       ...(hasBonus ? { bonus: s.bonus > 0 ? { display: `+${s.bonus}`, num: s.bonus } : { display: '–', num: null } } : {}),
     },
