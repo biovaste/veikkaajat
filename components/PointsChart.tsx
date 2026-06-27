@@ -121,6 +121,16 @@ function ChartInner({
 export default function PointsChart({ data, players, colors }: Props) {
   const [mode, setMode] = useState<Mode>('pisteet')
   const [expanded, setExpanded] = useState(false)
+  const [hiddenPlayers, setHiddenPlayers] = useState<Set<string>>(new Set())
+
+  function togglePlayer(name: string) {
+    setHiddenPlayers(prev => {
+      const next = new Set(prev)
+      if (next.has(name)) next.delete(name)
+      else next.add(name)
+      return next
+    })
+  }
 
   const rankData = useMemo<Record<string, number>[]>(() => {
     return data.map(row => {
@@ -167,7 +177,40 @@ export default function PointsChart({ data, players, colors }: Props) {
   if (data.length === 0 && players.length === 0) return null
 
   const activeData = mode === 'pisteet' ? data : mode === 'sijainti' ? rankData : mode === 'ero' ? gapData : avgGapData
+  const visiblePlayers = players.filter(p => !hiddenPlayers.has(p))
+  const visibleColors = colors?.filter((_, i) => !hiddenPlayers.has(players[i]))
   const title = TABS.find(t => t.key === mode)?.title
+
+  const pillRow = (
+    <div className="flex flex-wrap gap-2 mb-3">
+      {players.map((player, i) => {
+        const color = colors?.[i] ?? '#888888'
+        const hidden = hiddenPlayers.has(player)
+        return (
+          <button
+            key={player}
+            onClick={() => togglePlayer(player)}
+            className="px-2.5 py-1 rounded-full text-xs font-medium transition-colors"
+            style={
+              hidden
+                ? { backgroundColor: 'white', color, border: `1.5px solid ${color}` }
+                : { backgroundColor: color, color: 'white', border: `1.5px solid ${color}` }
+            }
+          >
+            {player}
+          </button>
+        )
+      })}
+      {hiddenPlayers.size > 0 && (
+        <button
+          onClick={() => setHiddenPlayers(new Set())}
+          className="px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-500 hover:bg-gray-200 transition-colors"
+        >
+          Kaikki
+        </button>
+      )}
+    </div>
+  )
 
   const header = (onExpand?: () => void) => (
     <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
@@ -207,7 +250,8 @@ export default function PointsChart({ data, players, colors }: Props) {
       {/* Inline card */}
       <div className="bg-white rounded-lg border border-gray-200 p-4">
         {header(() => setExpanded(true))}
-        <ChartInner activeData={activeData} players={players} colors={colors} mode={mode} height={510} totalPlayers={players.length} />
+        {pillRow}
+        <ChartInner activeData={activeData} players={visiblePlayers} colors={visibleColors} mode={mode} height={510} totalPlayers={players.length} />
       </div>
 
       {/* Fullscreen overlay */}
@@ -244,8 +288,9 @@ export default function PointsChart({ data, players, colors }: Props) {
                 </button>
               </div>
             </div>
-            <div className="flex-1 min-h-0">
-              <ChartInner activeData={activeData} players={players} colors={colors} mode={mode} height={630} totalPlayers={players.length} />
+            <div className="flex-1 min-h-0 flex flex-col">
+              {pillRow}
+              <ChartInner activeData={activeData} players={visiblePlayers} colors={visibleColors} mode={mode} height={630} totalPlayers={players.length} />
             </div>
           </div>
         </div>
