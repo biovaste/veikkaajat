@@ -248,15 +248,16 @@ export default async function LeaderboardPage() {
   type RoundKey = string  // 'G1' | 'G2' | 'G3' | 'R16' | 'QF' | 'SF' | '3P' | 'F'
   type RoundStats = { pts: number; n: number; exact: number }
 
-  const ROUND_ORDER: RoundKey[] = ['G1', 'G2', 'G3', 'R16', 'QF', 'SF', '3P', 'F']
+  const ROUND_ORDER: RoundKey[] = ['G1', 'G2', 'G3', 'R32', 'R16', 'QF', 'SF', '3P', 'F']
   const ROUND_LABEL: Record<RoundKey, string> = {
     G1: 'Kierros 1', G2: 'Kierros 2', G3: 'Kierros 3',
-    R16: 'R16', QF: 'Puolivälierät', SF: 'Välierät', '3P': 'Pronssi', F: 'Finaali',
+    R32: 'R32', R16: 'R16', QF: 'Puolivälierät', SF: 'Välierät', '3P': 'Pronssi', F: 'Finaali',
   }
 
   function roundKey(stage: string, matchDay: number | null): RoundKey {
     if (stage === 'GROUP_STAGE') return `G${matchDay ?? 1}` as RoundKey
-    if (stage === 'ROUND_OF_16') return 'R16'
+    if (stage === 'LAST_32') return 'R32'
+    if (stage === 'LAST_16') return 'R16'
     if (stage === 'QUARTER_FINALS') return 'QF'
     if (stage === 'SEMI_FINALS') return 'SF'
     if (stage === 'THIRD_PLACE') return '3P'

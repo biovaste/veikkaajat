@@ -59,14 +59,16 @@ const FI_NAMES: Record<string, string> = {
 
 // ── Stage mapping ─────────────────────────────────────────────────────────────
 const STAGE_HIST_CODES: Record<string, string[]> = {
-  ROUND_OF_16: ['JP'],
+  LAST_32: ['JP'],
+  LAST_16: ['JP'],
   QUARTER_FINALS: ['JPV'],
   SEMI_FINALS: ['JV'],
   FINAL: ['JF', 'JNV'],
 }
 
 const STAGE_FI_LABEL: Record<string, string> = {
-  ROUND_OF_16: 'pudotuspelissä (1/8)',
+  LAST_32: 'pudotuspelissä (1/32)',
+  LAST_16: 'pudotuspelissä (1/16)',
   QUARTER_FINALS: 'puolivälierässä',
   SEMI_FINALS: 'välierässä',
   FINAL: 'finaalissa',
