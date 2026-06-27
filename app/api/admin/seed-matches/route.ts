@@ -37,8 +37,7 @@ export async function POST(request: NextRequest) {
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-    const stages = [...new Set(matches.map((m) => m.stage))]
-    return NextResponse.json({ imported: count ?? rows.length, fetched: rows.length, stage: stage ?? 'all', stages })
+    return NextResponse.json({ imported: rows.length, stage: stage ?? 'all' })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     console.error('[seed-matches]', message)

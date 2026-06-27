@@ -4,8 +4,8 @@ import { useState } from 'react'
 
 const STAGES = [
   { value: 'GROUP_STAGE', label: 'Lohkovaihe' },
-  { value: 'ROUND_OF_32', label: 'Kuudestoistafinaalit' },
-  { value: 'ROUND_OF_16', label: 'Kahdeksasfinaalit' },
+  { value: 'LAST_32', label: 'Kuudestoistafinaalit' },
+  { value: 'LAST_16', label: 'Kahdeksasfinaalit' },
   { value: 'QUARTER_FINALS', label: 'Neljännesfinaalit' },
   { value: 'SEMI_FINALS', label: 'Puolifinaalit' },
   { value: 'THIRD_PLACE', label: 'Pronssiottelu' },
@@ -16,7 +16,7 @@ const STAGES = [
 export default function SeedPage() {
   const [stage, setStage] = useState('GROUP_STAGE')
   const [loading, setLoading] = useState(false)
-  const [result, setResult] = useState<{ imported?: number; fetched?: number; stages?: string[]; error?: string } | null>(null)
+  const [result, setResult] = useState<{ imported?: number; error?: string } | null>(null)
 
   async function handleSeed() {
     setLoading(true)
@@ -65,7 +65,7 @@ export default function SeedPage() {
           <div className={`rounded-lg p-3 text-sm ${result.error ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}>
             {result.error
               ? `Virhe: ${result.error}`
-              : `✓ ${result.imported} ottelua tuotu/päivitetty (API palautti: ${result.fetched})${result.stages?.length ? `\nVaiheet: ${result.stages.join(', ')}` : ''}`}
+              : `✓ ${result.imported} ottelua tuotu/päivitetty`}
           </div>
         )}
       </div>
