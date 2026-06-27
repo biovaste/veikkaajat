@@ -7,7 +7,7 @@ import {
   XAxis,
   YAxis,
   Tooltip,
-  Legend,
+  Brush,
   ResponsiveContainer,
   ReferenceLine,
 } from 'recharts'
@@ -74,12 +74,14 @@ function ChartInner({
   colors,
   mode,
   height,
+  totalPlayers,
 }: {
   activeData: Record<string, number>[]
   players: string[]
   colors?: string[]
   mode: Mode
   height: number
+  totalPlayers: number
 }) {
   return (
     <ResponsiveContainer width="100%" height={height}>
@@ -94,11 +96,11 @@ function ChartInner({
           width={36}
           reversed={mode === 'sijainti'}
           tickFormatter={mode === 'sijainti' ? (v: number) => `${v}.` : undefined}
-          domain={mode === 'sijainti' ? [1, players.length] : undefined}
+          domain={mode === 'sijainti' ? [1, totalPlayers] : undefined}
           allowDecimals={false}
         />
         <Tooltip content={<SortedTooltip mode={mode} />} />
-        <Legend iconType="plainline" wrapperStyle={{ fontSize: 12, paddingTop: 8 }} />
+        <Brush dataKey="match" height={20} travellerWidth={8} stroke="#d1d5db" />
         {(mode === 'ero' || mode === 'ka-ero') && <ReferenceLine y={0} stroke="#d1d5db" strokeDasharray="4 4" />}
         {players.map((player, i) => (
           <Line
@@ -205,7 +207,7 @@ export default function PointsChart({ data, players, colors }: Props) {
       {/* Inline card */}
       <div className="bg-white rounded-lg border border-gray-200 p-4">
         {header(() => setExpanded(true))}
-        <ChartInner activeData={activeData} players={players} colors={colors} mode={mode} height={480} />
+        <ChartInner activeData={activeData} players={players} colors={colors} mode={mode} height={510} totalPlayers={players.length} />
       </div>
 
       {/* Fullscreen overlay */}
@@ -243,7 +245,7 @@ export default function PointsChart({ data, players, colors }: Props) {
               </div>
             </div>
             <div className="flex-1 min-h-0">
-              <ChartInner activeData={activeData} players={players} colors={colors} mode={mode} height={600} />
+              <ChartInner activeData={activeData} players={players} colors={colors} mode={mode} height={630} totalPlayers={players.length} />
             </div>
           </div>
         </div>
