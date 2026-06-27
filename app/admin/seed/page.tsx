@@ -16,7 +16,7 @@ const STAGES = [
 export default function SeedPage() {
   const [stage, setStage] = useState('GROUP_STAGE')
   const [loading, setLoading] = useState(false)
-  const [result, setResult] = useState<{ imported?: number; error?: string } | null>(null)
+  const [result, setResult] = useState<{ imported?: number; fetched?: number; error?: string } | null>(null)
 
   async function handleSeed() {
     setLoading(true)
@@ -65,7 +65,7 @@ export default function SeedPage() {
           <div className={`rounded-lg p-3 text-sm ${result.error ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}>
             {result.error
               ? `Virhe: ${result.error}`
-              : `✓ ${result.imported} ottelua tuotu/päivitetty`}
+              : `✓ ${result.imported} ottelua tuotu/päivitetty (API palautti: ${result.fetched})`}
           </div>
         )}
       </div>
