@@ -12,7 +12,8 @@ export function formatDate(dateStr: string): string {
 export function stageLabel(stage: string): string {
   const labels: Record<string, string> = {
     GROUP_STAGE: 'Lohkovaihe',
-    ROUND_OF_16: 'Kahdeksasfinaalit',
+    LAST_32: 'Kuudestoistafinaalit',
+    LAST_16: 'Kahdeksasfinaalit',
     QUARTER_FINALS: 'Neljännesfinaalit',
     SEMI_FINALS: 'Puolifinaalit',
     THIRD_PLACE: 'Pronssiottelu',

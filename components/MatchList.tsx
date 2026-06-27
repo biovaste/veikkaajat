@@ -27,7 +27,7 @@ interface Props {
   predMap: Record<number, Prediction>
 }
 
-const STAGE_ORDER = ['GROUP_STAGE', 'ROUND_OF_16', 'QUARTER_FINALS', 'SEMI_FINALS', 'THIRD_PLACE', 'FINAL']
+const STAGE_ORDER = ['GROUP_STAGE', 'LAST_32', 'LAST_16', 'QUARTER_FINALS', 'SEMI_FINALS', 'THIRD_PLACE', 'FINAL']
 
 export default function MatchList({ matches, predMap }: Props) {
   const now = new Date()
