@@ -4,6 +4,7 @@ import { useState } from 'react'
 
 const STAGES = [
   { value: 'GROUP_STAGE', label: 'Lohkovaihe' },
+  { value: 'ROUND_OF_32', label: 'Kuudestoistafinaalit' },
   { value: 'ROUND_OF_16', label: 'Kahdeksasfinaalit' },
   { value: 'QUARTER_FINALS', label: 'Neljännesfinaalit' },
   { value: 'SEMI_FINALS', label: 'Puolifinaalit' },
