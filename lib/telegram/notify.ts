@@ -4,9 +4,27 @@ import { getCountry } from '../countries'
 import { isWildcard, wildcardCountry } from '../players'
 import { calculatePoints } from '../scoring/engine'
 import { assignColors } from '../colors'
+import { getEliminatedCountries, isChampionPickEliminated, isScorerPickEliminated } from '../eliminations'
+import { fetchTopScorers } from '../football-data/client'
+
+const ELIMINATED_COLOR = '#dc2626'
 
 const GROUP_CHAT_ID = process.env.TELEGRAM_GROUP_CHAT_ID!
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? ''
+
+/** Log a failed Telegram send for manual retry via /admin/telegram-failures. */
+async function logTelegramFailure(args: {
+  chatId: string | number; kind: string; matchId?: number; text: string; replyMarkup?: object; error: string
+}): Promise<void> {
+  const admin = createServiceRoleClient()
+  await admin.from('telegram_send_failures').insert({
+    chat_id: String(args.chatId),
+    kind: args.kind,
+    match_id: args.matchId ?? null,
+    payload: { text: args.text, reply_markup: args.replyMarkup ?? null },
+    error: args.error,
+  }).then(() => {}, (err: unknown) => console.error('[logTelegramFailure]', err))
+}
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -105,7 +123,8 @@ export async function sendResultMessage(
   }
   text += '</tg-spoiler>'
 
-  await sendMessage(GROUP_CHAT_ID, text)
+  const res = await sendMessage(GROUP_CHAT_ID, text)
+  if (!res.ok) await logTelegramFailure({ chatId: GROUP_CHAT_ID, kind: 'result', matchId: match.id, text, error: res.error ?? 'unknown' })
 }
 
 // ─── Individual reminder ──────────────────────────────────────────────────────
@@ -118,11 +137,13 @@ export async function sendReminderDM(
     `⏰ Muistutus!\n` +
     `<b>${match.home_team} – ${match.away_team}</b> alkaa pian.\n` +
     `Et ole vielä veikannut tätä ottelua.`
-  await sendMessageWithMarkup(chatId, text, {
+  const replyMarkup = {
     inline_keyboard: [[
       { text: '✏️ Veikkaa nyt', callback_data: `edit:${match.id}` },
     ]],
-  })
+  }
+  const res = await sendMessageWithMarkup(chatId, text, replyMarkup)
+  if (!res.ok) await logTelegramFailure({ chatId, kind: 'reminder', matchId: match.id, text, replyMarkup, error: res.error ?? 'unknown' })
 }
 
 // ─── Stats table ─────────────────────────────────────────────────────────────
@@ -131,17 +152,23 @@ export async function sendStatsTable(chatId?: number | string): Promise<void> {
   const target = String(chatId ?? GROUP_CHAT_ID)
   const admin = createServiceRoleClient()
 
-  const [{ data: log }, { data: profiles }, { data: catBets }, { data: preds }, { data: firstMatch }, { data: xgMatches }] = await Promise.all([
+  const [{ data: log }, { data: profiles }, { data: catBets }, { data: preds }, { data: firstMatch }, { data: xgMatches }, { data: koMatches }] = await Promise.all([
     admin.from('scoring_log').select('user_id, points, breakdown, match_id, matches(stage, kickoff_at)').order('match_id', { ascending: true }),
     admin.from('profiles').select('id, display_name').order('display_name'),
     admin.from('category_bets').select('user_id, category, bet_value, points'),
     admin.from('predictions').select('user_id, home_score_pred, away_score_pred, match_id, matches(home_score, away_score, status, home_xg, away_xg)'),
     admin.from('matches').select('kickoff_at').order('kickoff_at', { ascending: true }).limit(1).single(),
     admin.from('matches').select('id, home_xg, away_xg').not('home_xg', 'is', null).not('away_xg', 'is', null),
+    admin.from('matches').select('home_team, away_team, home_score, away_score, winner_team, stage, status'),
   ])
 
   // Special bet picks are hidden until the betting deadline (first match kickoff) has passed
   const categoryBetsOpen = !firstMatch?.kickoff_at || new Date() < new Date(firstMatch.kickoff_at)
+
+  const eliminatedCountries = getEliminatedCountries(koMatches ?? [])
+  const leadingScorerNames = new Set(
+    await fetchTopScorers(10).then((s) => s.map((p) => p.player.name)).catch(() => []),
+  )
 
   if (!profiles) {
     await sendMessage(target, '⚠️ Tilastoja ei saatavilla.')
@@ -372,8 +399,16 @@ export async function sendStatsTable(chatId?: number | string): Promise<void> {
       ...(hasXg ? { xg: s.xg_n > 0 ? numCell(s.xg_pts) : { display: '–', num: null } } : {}),
       ...(hasBonus ? { bonus: s.bonus > 0 ? { display: `+${s.bonus}`, num: s.bonus } : { display: '–', num: null } } : {}),
       ...(hasPicks ? {
-        champ: { display: s.champion_bet ? truncate(getCountry(s.champion_bet).name, 16) : '–', num: null },
-        scorer: { display: s.scorer_bet ? truncate(scorerLabel(s.scorer_bet), 21) : '–', num: null },
+        champ: {
+          display: s.champion_bet ? truncate(getCountry(s.champion_bet).name, 16) : '–',
+          num: null,
+          ...(s.champion_bet && isChampionPickEliminated(s.champion_bet, eliminatedCountries) ? { textColor: ELIMINATED_COLOR } : {}),
+        },
+        scorer: {
+          display: s.scorer_bet ? truncate(scorerLabel(s.scorer_bet), 21) : '–',
+          num: null,
+          ...(s.scorer_bet && isScorerPickEliminated(s.scorer_bet, eliminatedCountries, leadingScorerNames) ? { textColor: ELIMINATED_COLOR } : {}),
+        },
       } : {}),
     },
   }))
@@ -399,6 +434,36 @@ export async function sendStatsTable(chatId?: number | string): Promise<void> {
       `<code>${lines.join('\n')}</code>\n\n` +
       `🔗 Kaikki tilastot: ${appUrl}/leaderboard`
     await sendMessage(target, text)
+  }
+}
+
+// ─── Playoff bracket image ───────────────────────────────────────────────────
+
+export async function sendBracketImage(chatId?: number | string): Promise<void> {
+  const target = String(chatId ?? GROUP_CHAT_ID)
+  const admin = createServiceRoleClient()
+
+  const { data: matches } = await admin
+    .from('matches')
+    .select('stage, home_team, away_team, home_score, away_score, winner_team, status, kickoff_at')
+
+  if (!matches || !matches.some((m) => m.stage !== 'GROUP_STAGE')) {
+    await sendMessage(target, 'ℹ️ Pudotuspelit eivät ole vielä alkaneet.')
+    return
+  }
+
+  try {
+    const { renderBracketImage } = await import('./bracket-image')
+    const png = await renderBracketImage(matches)
+    if (!png) {
+      await sendMessage(target, 'ℹ️ Pudotuspelit eivät ole vielä alkaneet.')
+      return
+    }
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? ''
+    await sendPhotoBytes(target, png, `🏆 <b>MM 2026 — Pudotuspelikaavio</b>\n🔗 ${appUrl}/leaderboard`)
+  } catch (err) {
+    console.error('[bracket] image failed:', err)
+    await sendMessage(target, '⚠️ Kaavio ei onnistu juuri nyt.')
   }
 }
 

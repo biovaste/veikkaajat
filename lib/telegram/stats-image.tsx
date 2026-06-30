@@ -15,6 +15,8 @@ export interface ImgCell {
   display: string
   /** Numeric value used for the color scale; null = no data (no color) */
   num: number | null
+  /** Explicit text color override (e.g. red for an eliminated champion/scorer pick) */
+  textColor?: string
 }
 
 export interface ImgRow {
@@ -109,7 +111,10 @@ export async function renderStatsImage(
             {columns.map((col) => {
               const cell = row.cells[col.key]
               return (
-                <div key={col.key} style={{ ...colCellStyle(col), backgroundColor: cellBg(col, cell) }}>
+                <div
+                  key={col.key}
+                  style={{ ...colCellStyle(col), backgroundColor: cellBg(col, cell), ...(cell?.textColor ? { color: cell.textColor } : {}) }}
+                >
                   {cell?.display ?? '–'}
                 </div>
               )

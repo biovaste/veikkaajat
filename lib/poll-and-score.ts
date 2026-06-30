@@ -2,6 +2,34 @@ import { createServiceRoleClient } from '@/lib/supabase/server'
 import { fetchMatch } from '@/lib/football-data/client'
 import { fetchFsResultsThrottled, fetchFsXg, type FsResultRow } from '@/lib/flashscore/client'
 import { scoreMatchAndNotify } from './scoring/score-and-notify'
+import { sendMessage } from '@/lib/telegram/bot'
+import { SupabaseClient } from '@supabase/supabase-js'
+
+/**
+ * football-data.org's score.fullTime for a match that went to extra time is the
+ * *final* match score (it can include extra-time goals), not the 90-minute score
+ * our scoring rules require — and there's no separate 90-minute-only field. So
+ * those matches are never auto-scored; flag them and DM the admins to score them
+ * manually (with the real 90-minute score) via /admin/matches.
+ */
+async function flagForManualScoring(
+  admin: SupabaseClient,
+  match: { id: number; home_team: string; away_team: string },
+  winnerTeam: 'HOME' | 'AWAY' | null,
+  adminChatIds: string[],
+): Promise<void> {
+  await admin.from('matches').update({
+    went_to_extra_time: true,
+    needs_manual_score: true,
+    ...(winnerTeam ? { winner_team: winnerTeam } : {}),
+  }).eq('id', match.id)
+
+  const text = `⚠️ <b>${match.home_team} – ${match.away_team}</b> päättyi jatkoajalla/rangaistuspotkuilla — ` +
+    `pisteytä käsin 90 min tuloksella osoitteessa /admin/matches.`
+  for (const chatId of adminChatIds) {
+    await sendMessage(chatId, text).catch(() => {})
+  }
+}
 
 export interface PollResult {
   checked: number   // matches inspected
@@ -27,9 +55,10 @@ export async function pollAndScoreFinishedMatches(): Promise<PollResult> {
 
   const { data: candidates } = await admin
     .from('matches')
-    .select('id, external_id, home_team, away_team, kickoff_at, fs_match_id, fs_xg_attempts')
+    .select('id, external_id, home_team, away_team, kickoff_at, stage, fs_match_id, fs_xg_attempts')
     .is('home_score', null)
     .eq('status', 'SCHEDULED')
+    .eq('needs_manual_score', false)
     .lte('kickoff_at', cutoffEarly)
     .gte('kickoff_at', cutoffLate)
     .order('kickoff_at', { ascending: true })
@@ -40,9 +69,28 @@ export async function pollAndScoreFinishedMatches(): Promise<PollResult> {
 
   // Flashscore results feed, fetched lazily at most once per run (throttled)
   let fsResults: FsResultRow[] | null | undefined
+  // Admin chat ids for manual-scoring alerts, fetched lazily at most once per run
+  let adminChatIds: string[] | undefined
 
   for (const match of candidates) {
     const fd = await fetchMatch(match.external_id).catch(() => null)
+
+    if (fd?.status === 'FINISHED' && fd.score.duration && fd.score.duration !== 'REGULAR') {
+      // football-data.org's fullTime is the FINAL match score for ET/penalty games
+      // (it can include extra-time goals) — there's no 90-minute-only field, so this
+      // can't be auto-scored. Flag for manual scoring instead of guessing.
+      const winnerTeam = fd.score.winner === 'HOME_TEAM' ? 'HOME' : fd.score.winner === 'AWAY_TEAM' ? 'AWAY' : null
+      if (adminChatIds === undefined) {
+        const { data: admins } = await admin
+          .from('profiles')
+          .select('telegram_chat_id')
+          .eq('is_admin', true)
+          .not('telegram_chat_id', 'is', null)
+        adminChatIds = (admins ?? []).map((a) => a.telegram_chat_id!)
+      }
+      await flagForManualScoring(admin, match, winnerTeam, adminChatIds)
+      continue
+    }
 
     let home_score: number | null = null
     let away_score: number | null = null
@@ -50,7 +98,11 @@ export async function pollAndScoreFinishedMatches(): Promise<PollResult> {
     if (fd?.status === 'FINISHED' && fd.score.fullTime.home !== null && fd.score.fullTime.away !== null) {
       home_score = fd.score.fullTime.home
       away_score = fd.score.fullTime.away
-    } else if (match.fs_match_id && Date.now() - +new Date(match.kickoff_at) >= 105 * 60 * 1000) {
+    } else if (
+      match.fs_match_id &&
+      match.stage === 'GROUP_STAGE' &&  // knockout matches can go to ET — only football-data.org tells us
+      Date.now() - +new Date(match.kickoff_at) >= 105 * 60 * 1000
+    ) {
       // football-data.org hasn't confirmed yet — check Flashscore's results feed
       if (fsResults === undefined) fsResults = await fetchFsResultsThrottled(admin).catch(() => null)
       const fsRow = fsResults?.find(r => r.match_id === match.fs_match_id)

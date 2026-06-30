@@ -34,19 +34,22 @@ export default async function HistoryPage({
   const { comp } = await searchParams
   const selectedComp = comp ?? 'all'
 
-  const [{ data: competitions }, { data: rawStats }, { data: histPlayers }] = await Promise.all([
+  const [{ data: competitions }, { data: rawStats }, { data: liveStats }, { data: histPlayers }] = await Promise.all([
     supabase.from('competitions').select('id, name, type, year').order('year'),
     supabase.from('hist_player_comp_stats').select('*'),
+    supabase.from('live_player_comp_stats').select('*'),
     supabase.from('hist_players').select('canonical_name, profile_id'),
   ])
 
-  // Players with a profile_id are active in the current app (WC2026)
-  const activePlayers = new Set(
-    (histPlayers ?? []).filter(p => p.profile_id).map(p => p.canonical_name)
-  )
+  // Players with a profile_id are active in the current app (WC2026); live MM26
+  // rows are MM26 participants by construction (player_name = profiles.display_name)
+  const activePlayers = new Set([
+    ...(histPlayers ?? []).filter(p => p.profile_id).map(p => p.canonical_name),
+    ...(liveStats ?? []).map(r => r.player_name),
+  ])
 
   const comps = competitions ?? []
-  const allStats = (rawStats ?? []) as CompStat[]
+  const allStats = [...(rawStats ?? []), ...(liveStats ?? [])] as CompStat[]
 
   // ── Stats table: aggregate across selected competition(s) ─────────────────
   const filtered = selectedComp === 'all'

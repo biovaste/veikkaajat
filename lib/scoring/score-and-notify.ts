@@ -12,6 +12,7 @@ export async function scoreMatchAndNotify(
   matchId: number,
   homeScore: number,
   awayScore: number,
+  winnerTeam?: 'HOME' | 'AWAY',
 ): Promise<{ scored: number; error?: string }> {
   // Snapshot leaderboard BEFORE scoring this match (exclude current match's log)
   const [{ data: prevLog }, { data: catBets }] = await Promise.all([
@@ -38,12 +39,16 @@ export async function scoreMatchAndNotify(
     .select('id, display_name, telegram_chat_id')
     .order('display_name')
 
-  // Update match result
+  // Update match result. winner_team (HOME/AWAY) records who actually advanced for
+  // knockout matches decided by extra time/penalties — never fed into point scoring,
+  // which always uses the 90-minute home_score/away_score above.
   await admin.from('matches').update({
     home_score: homeScore,
     away_score: awayScore,
     status: 'FINISHED',
     result_confirmed_at: new Date().toISOString(),
+    needs_manual_score: false,
+    ...(winnerTeam ? { winner_team: winnerTeam } : {}),
   }).eq('id', matchId)
 
   const { data: predictions, error: predError } = await admin
@@ -73,6 +78,11 @@ export async function scoreMatchAndNotify(
       match_id: matchId, user_id, points, breakdown,
     })),
   )
+
+  // Keep the leaderboard's materialized view in sync (best-effort; the page
+  // still works off the underlying tables if a refresh is ever missed).
+  const { error: mvError } = await admin.rpc('refresh_mv_player_match_log')
+  if (mvError) console.error('[score-and-notify] mv refresh failed:', mvError)
 
   // Build leaderboard with Tark tie-breaker
   const newTotals: Record<string, number> = { ...prevTotals }

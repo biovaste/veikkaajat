@@ -40,6 +40,13 @@ export default function AdminPage() {
           <div className="font-medium">Sulkeutuvat pian</div>
           <div className="text-sm text-gray-500 mt-0.5">Veikkaukset sulkeutuvat seuraavan 24h aikana</div>
         </Link>
+        <Link
+          href="/admin/telegram-failures"
+          className="block p-4 bg-white rounded-lg border border-gray-200 hover:border-blue-300 transition-colors"
+        >
+          <div className="font-medium">Telegram-virheet</div>
+          <div className="text-sm text-gray-500 mt-0.5">Epäonnistuneet viestit (esim. 429) — lähetä uudelleen</div>
+        </Link>
       </div>
     </div>
   )

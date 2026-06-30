@@ -178,18 +178,45 @@ function getFiChannel(home: string, away: string): string | null {
   return FI_CHANNELS[`${home}|${away}`] ?? null
 }
 
-async function tgSend(chatId: string | number, text: string, replyMarkup?: object): Promise<string | null> {
+function sleep(ms: number) { return new Promise((r) => setTimeout(r, ms)) }
+
+async function tgSend(
+  chatId: string | number,
+  text: string,
+  replyMarkup?: object,
+  retriesLeft = 2,
+): Promise<string | null> {
   const res = await fetch(`${TG}/sendMessage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML', ...(replyMarkup ? { reply_markup: replyMarkup } : {}) }),
   })
+  if (res.status === 429 && retriesLeft > 0) {
+    const data = await res.json().catch(() => null) as { parameters?: { retry_after?: number } } | null
+    const retryAfter = data?.parameters?.retry_after ?? 1
+    await sleep((retryAfter + 1) * 1000)
+    return tgSend(chatId, text, replyMarkup, retriesLeft - 1)
+  }
   if (!res.ok) {
     const err = await res.text()
     console.error(`[tgSend] chat ${chatId} failed: ${res.status} ${err}`)
     return err
   }
   return null
+}
+
+/** Log a failed Telegram send for manual retry via /admin/telegram-failures. */
+async function logSendFailure(
+  db: ReturnType<typeof createClient>,
+  args: { chatId: string | number; kind: string; matchId?: number; text: string; replyMarkup?: object; error: string },
+): Promise<void> {
+  await db.from('telegram_send_failures').insert({
+    chat_id: String(args.chatId),
+    kind: args.kind,
+    match_id: args.matchId ?? null,
+    payload: { text: args.text, reply_markup: args.replyMarkup ?? null },
+    error: args.error,
+  }).then(() => {}, (err: unknown) => console.error('[logSendFailure]', err))
 }
 
 // Helsinki is EEST (UTC+3) during WC 2026 (June–July)
@@ -391,6 +418,7 @@ Deno.serve(async (_req) => {
 
     const error = await tgSend(GROUP_CHAT_ID, text)
     sendResults.push({ match: match.id, kind: 'kickoff', error })
+    if (error) await logSendFailure(db, { chatId: GROUP_CHAT_ID, kind: 'kickoff', matchId: match.id, text, error })
 
     // Only mark sent if Telegram accepted the message, so failures retry next run
     if (!error) {
@@ -416,7 +444,7 @@ Deno.serve(async (_req) => {
     .from('matches')
     .select('id, home_team, away_team, kickoff_at')
     .eq('reminder_sent', false)
-    .eq('status', 'SCHEDULED')
+    .in('status', ['SCHEDULED', 'TIMED'])
     .gt('kickoff_at', now.toISOString())
     .lt('kickoff_at', horizon.toISOString())
 
@@ -445,11 +473,20 @@ Deno.serve(async (_req) => {
         `⏰ Muistutus!\n` +
         `<b>${match.home_team} – ${match.away_team}</b> alkaa pian.\n` +
         `Et ole vielä veikannut tätä ottelua.`
-      const error = await tgSend(player.telegram_chat_id!, text, {
+      const replyMarkup = {
         inline_keyboard: [[
           { text: '✏️ Veikkaa nyt', callback_data: `edit:${match.id}` },
         ]],
-      })
+      }
+      // tgSend already retries once on 429 with Telegram's own backoff; if it
+      // still fails (e.g. a longer rate-limit window), log it so an admin can
+      // resend manually instead of silently dropping the reminder.
+      const error = await tgSend(player.telegram_chat_id!, text, replyMarkup)
+      if (error) {
+        await logSendFailure(db, {
+          chatId: player.telegram_chat_id!, kind: 'reminder', matchId: match.id, text, replyMarkup, error,
+        })
+      }
       sendResults.push({ match: match.id, kind: 'reminder', error })
     }
 

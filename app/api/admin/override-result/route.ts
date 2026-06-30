@@ -16,18 +16,30 @@ export async function POST(request: NextRequest) {
       .single()
     if (!profile?.is_admin) return NextResponse.json({ error: 'Ei oikeuksia' }, { status: 403 })
 
-    const { match_id, home_score, away_score } = await request.json()
+    const { match_id, home_score, away_score, winner_team } = await request.json()
 
     if (
       typeof match_id !== 'number' ||
       typeof home_score !== 'number' ||
       typeof away_score !== 'number' ||
-      home_score < 0 || away_score < 0
+      home_score < 0 || away_score < 0 ||
+      (winner_team !== undefined && winner_team !== 'HOME' && winner_team !== 'AWAY')
     ) {
       return NextResponse.json({ error: 'Virheelliset tiedot' }, { status: 400 })
     }
 
     const admin = createServiceRoleClient()
+
+    // A knockout-stage draw needs winner_team to record who actually advanced
+    // (the UI enforces this too, but that's client-side only — enforce it here
+    // as well so a direct API call can't leave a match "finished" with both
+    // teams looking eliminated in the bracket/elimination views).
+    if (home_score === away_score && !winner_team) {
+      const { data: matchStage } = await admin.from('matches').select('stage').eq('id', match_id).single()
+      if (matchStage && matchStage.stage !== 'GROUP_STAGE') {
+        return NextResponse.json({ error: 'Jatkopeli päättyi tasan — valitse kuka eteni jatkoon' }, { status: 400 })
+      }
+    }
 
     // Fetch xG from Flashscore (best-effort; skipped if already stored)
     try {
@@ -48,7 +60,7 @@ export async function POST(request: NextRequest) {
       console.warn('[override-result] xG fetch failed (non-fatal):', xgErr)
     }
 
-    const { scored, error } = await scoreMatchAndNotify(admin, match_id, home_score, away_score)
+    const { scored, error } = await scoreMatchAndNotify(admin, match_id, home_score, away_score, winner_team)
     if (error) return NextResponse.json({ error }, { status: 500 })
 
     return NextResponse.json({ scored, match_id })

@@ -2,9 +2,14 @@ import { createServerClient, createServiceRoleClient } from '@/lib/supabase/serv
 import { redirect } from 'next/navigation'
 import PointsChart from '@/components/PointsChart'
 import ChatBox from '@/components/ChatBox'
+import PlayoffBracket from '@/components/PlayoffBracket'
 import StatsTable, { type StatRowDef, type StatPlayer } from '@/components/StatsTable'
 import { calculatePoints } from '@/lib/scoring/engine'
 import { assignColors } from '@/lib/colors'
+import { getEliminatedCountries, isChampionPickEliminated, isScorerPickEliminated } from '@/lib/eliminations'
+import { fetchTopScorers } from '@/lib/football-data/client'
+import { getCountry } from '@/lib/countries'
+import { isWildcard, wildcardCountry } from '@/lib/players'
 
 export const dynamic = 'force-dynamic'
 
@@ -28,13 +33,17 @@ export default async function LeaderboardPage() {
     { data: preds, error: predsError },
     { data: xgMatches },
     { data: firstMatch },
+    { data: koMatches },
+    { data: picks },
   ] = await Promise.all([
     supabase.from('profiles').select('id, display_name, chart_color').order('display_name'),
-    supabase.from('scoring_log').select('user_id, points, breakdown, match_id, matches(stage, kickoff_at, match_day)').order('match_id', { ascending: true }),
+    supabase.from('mv_player_match_log').select('user_id, points, breakdown, match_id, stage, kickoff_at, match_day').order('match_id', { ascending: true }),
     supabase.from('category_bets').select('user_id, points, category').not('points', 'is', null),
     srSupabase.from('predictions').select('user_id, home_score_pred, away_score_pred, match_id, matches(home_score, away_score, status)'),
     supabase.from('matches').select('id, home_xg, away_xg').not('home_xg', 'is', null).not('away_xg', 'is', null),
     supabase.from('matches').select('kickoff_at').order('kickoff_at', { ascending: true }).limit(1).maybeSingle(),
+    supabase.from('matches').select('home_team, away_team, home_score, away_score, winner_team, stage, status, kickoff_at'),
+    supabase.from('category_bets').select('user_id, category, bet_value').in('category', ['WORLD_CHAMPION', 'TOP_SCORER']),
   ])
 
   if (profilesError) console.error('[leaderboard] profiles error:', profilesError)
@@ -46,6 +55,23 @@ export default async function LeaderboardPage() {
   const profiles = (allProfiles ?? []).filter(p => p.display_name)
 
   const categoryBetsOpen = !firstMatch?.kickoff_at || new Date() < new Date(firstMatch.kickoff_at)
+
+  // ── Champion/scorer picks (revealed after the betting deadline) ────────────
+  const eliminatedCountries = getEliminatedCountries(koMatches ?? [])
+  const leadingScorerNames = categoryBetsOpen
+    ? new Set<string>()
+    : new Set(await fetchTopScorers(10).then((s) => s.map((p) => p.player.name)).catch(() => []))
+
+  const pickMap: Record<string, { champion?: string; scorer?: string }> = {}
+  if (!categoryBetsOpen) {
+    for (const row of picks ?? []) {
+      const entry = pickMap[row.user_id] ?? (pickMap[row.user_id] = {})
+      if (row.category === 'WORLD_CHAMPION') entry.champion = row.bet_value
+      if (row.category === 'TOP_SCORER') entry.scorer = row.bet_value
+    }
+  }
+  const hasPicks = !categoryBetsOpen && Object.keys(pickMap).length > 0
+  const scorerLabel = (v: string) => isWildcard(v) ? `Muu ${getCountry(wildcardCountry(v)).name}` : v
 
   // ── Per-player stats ───────────────────────────────────────────────────────
 
@@ -93,9 +119,8 @@ export default async function LeaderboardPage() {
     const b = row.breakdown as { result: number; home_goals: number; away_goals: number } | null
     if (b && b.result === 3 && b.home_goals === 1 && b.away_goals === 1) s.exact += 1
     if (b && b.result === 3) s.correct_result += 1
-    const m = Array.isArray(row.matches) ? row.matches[0] : row.matches
-    if (m?.stage === 'GROUP_STAGE') { s.group_pts += row.points; s.group_n += 1 }
-    else if (m?.stage) { s.knockout_pts += row.points; s.knockout_n += 1 }
+    if (row.stage === 'GROUP_STAGE') { s.group_pts += row.points; s.group_n += 1 }
+    else if (row.stage) { s.knockout_pts += row.points; s.knockout_n += 1 }
     if (!perPlayerMatchPts[row.user_id]) perPlayerMatchPts[row.user_id] = []
     perPlayerMatchPts[row.user_id].push(row.points)
   }
@@ -121,8 +146,7 @@ export default async function LeaderboardPage() {
     const byMatch: Map<number, { user_id: string; points: number; kickoff_at: string }[]> = new Map()
     for (const row of log ?? []) {
       if (!byMatch.has(row.match_id)) byMatch.set(row.match_id, [])
-      const m = Array.isArray(row.matches) ? row.matches[0] : row.matches
-      byMatch.get(row.match_id)!.push({ user_id: row.user_id, points: row.points, kickoff_at: m?.kickoff_at ?? '' })
+      byMatch.get(row.match_id)!.push({ user_id: row.user_id, points: row.points, kickoff_at: row.kickoff_at ?? '' })
     }
     const byDay: Map<string, number[]> = new Map()
     for (const [match_id, rows] of byMatch) {
@@ -286,9 +310,8 @@ export default async function LeaderboardPage() {
   for (const row of log ?? []) {
     const name = profiles.find(p => p.id === row.user_id)?.display_name
     if (!name || !roundStats[name]) continue
-    const m = Array.isArray(row.matches) ? row.matches[0] : row.matches
-    if (!m?.stage) continue
-    const rk = roundKey(m.stage, (m as Record<string, unknown>).match_day as number | null ?? null)
+    if (!row.stage) continue
+    const rk = roundKey(row.stage, row.match_day ?? null)
     roundsSeen.add(rk)
     if (!roundStats[name][rk]) roundStats[name][rk] = { pts: 0, n: 0, exact: 0 }
     roundStats[name][rk].pts += row.points
@@ -407,6 +430,49 @@ export default async function LeaderboardPage() {
               {hasXg ? ' · xG-Pts=xG:n mukainen pistetilanne' : ''}
             </p>
           </div>
+
+          {/* ── Champion/scorer picks ── */}
+          {hasPicks && (
+            <div className="space-y-2">
+              <h2 className="text-lg font-semibold">Mestari &amp; Maalikuningas</h2>
+              <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                      <th className="text-left px-4 py-2 font-medium text-gray-600">Pelaaja</th>
+                      <th className="text-left px-4 py-2 font-medium text-gray-600">Mestari</th>
+                      <th className="text-left px-4 py-2 font-medium text-gray-600">Maalikuningas</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {sorted.map((p) => {
+                      const pick = pickMap[p.id]
+                      if (!pick?.champion && !pick?.scorer) return null
+                      const champOut = pick.champion ? isChampionPickEliminated(pick.champion, eliminatedCountries) : false
+                      const scorerOut = pick.scorer ? isScorerPickEliminated(pick.scorer, eliminatedCountries, leadingScorerNames) : false
+                      return (
+                        <tr key={p.id}>
+                          <td className="px-4 py-2 font-medium">{p.display_name}</td>
+                          <td className={`px-4 py-2 ${champOut ? 'text-red-600' : ''}`}>
+                            {pick.champion ? getCountry(pick.champion).name : '–'}
+                          </td>
+                          <td className={`px-4 py-2 ${scorerOut ? 'text-red-600' : ''}`}>
+                            {pick.scorer ? scorerLabel(pick.scorer) : '–'}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <p className="text-xs text-gray-400">Punainen = veikkaus pudonnut turnauksesta.</p>
+            </div>
+          )}
+
+          {/* ── Playoff bracket ── */}
+          {(koMatches ?? []).some(m => m.stage !== 'GROUP_STAGE') && (
+            <PlayoffBracket matches={koMatches ?? []} />
+          )}
 
           {/* ── Per-round stats ── */}
           {roundsToShow.length > 0 && (

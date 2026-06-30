@@ -1,32 +1,50 @@
 const BASE = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}`
 
-async function callTelegram(method: string, body: object): Promise<unknown> {
+export interface TelegramSendResult {
+  ok: boolean
+  status?: number
+  error?: string
+}
+
+function sleep(ms: number) { return new Promise((r) => setTimeout(r, ms)) }
+
+// Retries once on 429 (rate limit), honoring Telegram's retry_after hint, before
+// giving up. Callers that need to know about persistent failures (so they can be
+// logged for manual retry — see telegram_send_failures) should check the result.
+async function callTelegram(method: string, body: object, retriesLeft = 2): Promise<TelegramSendResult> {
   const res = await fetch(`${BASE}/${method}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
+  if (res.status === 429 && retriesLeft > 0) {
+    const data = await res.json().catch(() => null) as { parameters?: { retry_after?: number } } | null
+    const retryAfter = data?.parameters?.retry_after ?? 1
+    await sleep((retryAfter + 1) * 1000)
+    return callTelegram(method, body, retriesLeft - 1)
+  }
   if (!res.ok) {
     const err = await res.text()
     console.error(`[telegram] ${method} failed: ${err}`)
+    return { ok: false, status: res.status, error: err }
   }
-  return res.json().catch(() => null)
+  return { ok: true }
 }
 
 export async function sendMessage(
   chatId: string | number,
   text: string,
   parseMode: 'HTML' | 'MarkdownV2' = 'HTML',
-): Promise<void> {
-  await callTelegram('sendMessage', { chat_id: chatId, text, parse_mode: parseMode })
+): Promise<TelegramSendResult> {
+  return callTelegram('sendMessage', { chat_id: chatId, text, parse_mode: parseMode })
 }
 
 export async function sendMessageWithMarkup(
   chatId: string | number,
   text: string,
   replyMarkup: object,
-): Promise<void> {
-  await callTelegram('sendMessage', { chat_id: chatId, text, parse_mode: 'HTML', reply_markup: replyMarkup })
+): Promise<TelegramSendResult> {
+  return callTelegram('sendMessage', { chat_id: chatId, text, parse_mode: 'HTML', reply_markup: replyMarkup })
 }
 
 export async function answerCallbackQuery(callbackQueryId: string, text?: string): Promise<void> {

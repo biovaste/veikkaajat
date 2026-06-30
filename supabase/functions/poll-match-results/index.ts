@@ -111,6 +111,32 @@ async function resolveFsIds(db: Db, matches: { id: number; home_team: string; aw
   }
 }
 
+/**
+ * football-data.org's score.fullTime for a match that went to extra time is the
+ * *final* match score (it can include extra-time goals), not the 90-minute score
+ * our scoring rules require — and there's no separate 90-minute-only field. So
+ * those matches are never auto-scored; flag them and DM the admins to score them
+ * manually (with the real 90-minute score) via /admin/matches.
+ */
+async function flagForManualScoring(
+  db: Db,
+  match: { id: number; home_team: string; away_team: string },
+  winnerTeam: 'HOME' | 'AWAY' | null,
+  adminChatIds: string[],
+) {
+  await db.from('matches').update({
+    went_to_extra_time: true,
+    needs_manual_score: true,
+    ...(winnerTeam ? { winner_team: winnerTeam } : {}),
+  }).eq('id', match.id)
+
+  const text = `⚠️ <b>${match.home_team} – ${match.away_team}</b> päättyi jatkoajalla/rangaistuspotkuilla — ` +
+    `pisteytä käsin 90 min tuloksella osoitteessa /admin/matches.`
+  for (const chatId of adminChatIds) {
+    await tgSend(chatId, text)
+  }
+}
+
 // ─── Telegram result message ──────────────────────────────────────────────────
 
 async function sendResultMessage(
@@ -205,10 +231,13 @@ Deno.serve(async (_req) => {
     .from('matches')
     .select('id, external_id, home_team, away_team, kickoff_at, fs_match_id, fs_xg_attempts')
     .in('status', ['SCHEDULED', 'TIMED', 'IN_PLAY', 'PAUSED'])
+    .eq('needs_manual_score', false)
     .lt('kickoff_at', pollBefore.toISOString())
     .limit(10)
 
   let scored = 0
+  // Admin chat ids for manual-scoring alerts, fetched lazily at most once per run
+  let adminChatIds: string[] | undefined
 
   for (const match of matches ?? []) {
     try {
@@ -226,6 +255,23 @@ Deno.serve(async (_req) => {
       const status: string = fdMatch.status
 
       if (status === 'FINISHED') {
+        const duration: string | undefined = fdMatch.score?.duration
+        if (duration && duration !== 'REGULAR') {
+          const winner: string | null = fdMatch.score?.winner ?? null
+          const winnerTeam = winner === 'HOME_TEAM' ? 'HOME' : winner === 'AWAY_TEAM' ? 'AWAY' : null
+          if (adminChatIds === undefined) {
+            const { data: admins } = await db
+              .from('profiles')
+              .select('telegram_chat_id')
+              .eq('is_admin', true)
+              .not('telegram_chat_id', 'is', null)
+            adminChatIds = (admins ?? []).map((a: { telegram_chat_id: string }) => a.telegram_chat_id)
+          }
+          await flagForManualScoring(db, match, winnerTeam, adminChatIds)
+          await sleep(7000)
+          continue
+        }
+
         const homeScore: number = fdMatch.score?.fullTime?.home ?? null
         const awayScore: number = fdMatch.score?.fullTime?.away ?? null
 
@@ -281,6 +327,10 @@ Deno.serve(async (_req) => {
             updates.map(({ user_id, breakdown, points }) => ({
               match_id: match.id, user_id, points, breakdown,
             })),
+          )
+          await db.rpc('refresh_mv_player_match_log').then(
+            () => {},
+            (err: unknown) => console.error('[poll] mv refresh failed:', err),
           )
 
           if (BOT_TOKEN && GROUP_CHAT_ID) {

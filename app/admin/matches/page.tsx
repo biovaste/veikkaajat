@@ -14,16 +14,28 @@ interface Match {
   home_score: number | null
   away_score: number | null
   status: string
+  needs_manual_score: boolean
+  went_to_extra_time: boolean
+  winner_team: 'HOME' | 'AWAY' | null
 }
 
 function OverrideForm({ match, onDone }: { match: Match; onDone: () => void }) {
   const [home, setHome] = useState(match.home_score ?? '')
   const [away, setAway] = useState(match.away_score ?? '')
+  const [winnerTeam, setWinnerTeam] = useState<'HOME' | 'AWAY' | ''>(match.winner_team ?? '')
   const [saving, setSaving] = useState(false)
   const [result, setResult] = useState<string | null>(null)
 
+  const isKnockout = match.stage !== 'GROUP_STAGE'
+  const isDraw = home !== '' && away !== '' && Number(home) === Number(away)
+  const needsWinner = isKnockout && isDraw
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    if (needsWinner && !winnerTeam) {
+      setResult('Virhe: valitse kuka eteni jatkoon')
+      return
+    }
     setSaving(true)
     setResult(null)
     const res = await fetch('/api/admin/override-result', {
@@ -33,6 +45,7 @@ function OverrideForm({ match, onDone }: { match: Match; onDone: () => void }) {
         match_id: match.id,
         home_score: Number(home),
         away_score: Number(away),
+        ...(needsWinner ? { winner_team: winnerTeam } : {}),
       }),
     })
     const data = await res.json()
@@ -46,30 +59,54 @@ function OverrideForm({ match, onDone }: { match: Match; onDone: () => void }) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex items-center gap-2 mt-2 flex-wrap">
-      <input
-        type="number" min={0} max={30} required
-        value={home} onChange={(e) => setHome(e.target.value)}
-        className="w-14 text-center border border-gray-300 rounded px-2 py-1 text-sm font-bold"
-      />
-      <span className="text-gray-400">–</span>
-      <input
-        type="number" min={0} max={30} required
-        value={away} onChange={(e) => setAway(e.target.value)}
-        className="w-14 text-center border border-gray-300 rounded px-2 py-1 text-sm font-bold"
-      />
-      <button
-        type="submit" disabled={saving}
-        className="px-3 py-1 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
-      >
-        {saving ? '...' : 'Aseta tulos'}
-      </button>
-      {result && (
-        <span className={`text-xs ${result.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>
-          {result}
-        </span>
+    <div className="mt-2">
+      {match.needs_manual_score && (
+        <p className="text-xs text-amber-700 bg-amber-50 rounded px-2 py-1 mb-2">
+          ⚠️ Jatkoaika/rangaistuspotkut — pisteytä varsinaisen peliajan (90 min) tuloksella, EI lopputuloksella.
+        </p>
       )}
-    </form>
+      <form onSubmit={handleSubmit} className="flex items-center gap-2 flex-wrap">
+        <input
+          type="number" min={0} max={30} required
+          value={home} onChange={(e) => setHome(e.target.value)}
+          className="w-14 text-center border border-gray-300 rounded px-2 py-1 text-sm font-bold"
+        />
+        <span className="text-gray-400">–</span>
+        <input
+          type="number" min={0} max={30} required
+          value={away} onChange={(e) => setAway(e.target.value)}
+          className="w-14 text-center border border-gray-300 rounded px-2 py-1 text-sm font-bold"
+        />
+        {needsWinner && (
+          <select
+            value={winnerTeam}
+            onChange={(e) => setWinnerTeam(e.target.value as 'HOME' | 'AWAY' | '')}
+            required
+            className="border border-gray-300 rounded px-2 py-1 text-xs"
+          >
+            <option value="">Kuka eteni jatkoon?</option>
+            <option value="HOME">{match.home_team}</option>
+            <option value="AWAY">{match.away_team}</option>
+          </select>
+        )}
+        <button
+          type="submit" disabled={saving}
+          className="px-3 py-1 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
+        >
+          {saving ? '...' : 'Aseta tulos'}
+        </button>
+        {result && (
+          <span className={`text-xs ${result.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>
+            {result}
+          </span>
+        )}
+      </form>
+      {isKnockout && (
+        <p className="text-xs text-gray-400 mt-1">
+          Syötä tulos varsinaisen peliajan (90 min) jälkeen — EI jatkoajan/rangaistuspotkujen jälkeen.
+        </p>
+      )}
+    </div>
   )
 }
 

@@ -120,7 +120,16 @@ export async function POST(request: NextRequest) {
       }
 
       const msg = `🎯 <b>${categoryLabel}</b> pisteytetty!\nOikea vastaus: <b>${correct_value}</b>${winnerText}`
-      await sendMessage(process.env.TELEGRAM_GROUP_CHAT_ID, msg)
+      const result = await sendMessage(process.env.TELEGRAM_GROUP_CHAT_ID, msg)
+      if (!result.ok) {
+        console.error('[score-categories] Telegram notify error:', result.error)
+        await admin.from('telegram_send_failures').insert({
+          chat_id: process.env.TELEGRAM_GROUP_CHAT_ID,
+          kind: 'category_bet',
+          payload: { text: msg },
+          error: result.error ?? 'unknown',
+        })
+      }
     } catch (err) {
       console.error('[score-categories] Telegram notify error:', err)
     }

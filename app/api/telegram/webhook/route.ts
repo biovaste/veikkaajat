@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { sendMessage, sendMessageWithMarkup, answerCallbackQuery } from '@/lib/telegram/bot'
-import { sendStatsTable, sendChartImage, sendClanWar, sendTopScorers, sendOddsReport, sendStreaks } from '@/lib/telegram/notify'
+import { sendStatsTable, sendChartImage, sendClanWar, sendTopScorers, sendOddsReport, sendStreaks, sendBracketImage } from '@/lib/telegram/notify'
 import { scoreMatchAndNotify } from '@/lib/scoring/score-and-notify'
 import { pollAndScoreFinishedMatches } from '@/lib/poll-and-score'
 import { createServiceRoleClient } from '@/lib/supabase/server'
@@ -104,6 +104,11 @@ export async function POST(request: NextRequest) {
       console.error('[webhook /haetulos]', err)
       await sendMessage(chatId, '⚠️ Tulosten haku epäonnistui.').catch(console.error)
     }
+  } else if (text === '/jatkokaavio' && isGroup) {
+    await sendBracketImage(chatId).catch(async (err) => {
+      console.error('[webhook /jatkokaavio]', err)
+      await sendMessage(chatId, '⚠️ Kaavio ei onnistu juuri nyt.').catch(console.error)
+    })
   } else if (text === '/maaliporssi' && isGroup) {
     await sendTopScorers(chatId).catch(async (err) => {
       console.error('[webhook /maaliporssi]', err)
@@ -152,7 +157,7 @@ export async function POST(request: NextRequest) {
     const dmNote = isDM ? '\n\n📩 <b>Omat komennot (yksityisviesti):</b>\n/veikkaukset — seuraavat 5 veikkaustasi' : ''
     await sendMessage(
       chatId,
-      '📋 <b>Komennot (ryhmässä):</b>\n/chart — pistekehityskaavio\n/stats — tilastotaulukko\n/odds — kerroinanalyysi (KA-kerroin & ROI)\n/luokkasota — klaanien pistetilanne\n/maaliporssi — turnauksen maalipörssi (top 10)\n/putki — peräkkäisputket (top 3)\n/haetulos — hae tulos heti\n/setscore &lt;id&gt; &lt;k-v&gt; — aseta tulos (vain admin)\n/matchid — ottelutunnukset (vain admin)' +
+      '📋 <b>Komennot (ryhmässä):</b>\n/chart — pistekehityskaavio\n/stats — tilastotaulukko\n/jatkokaavio — pudotuspelikaavio\n/odds — kerroinanalyysi (KA-kerroin & ROI)\n/luokkasota — klaanien pistetilanne\n/maaliporssi — turnauksen maalipörssi (top 10)\n/putki — peräkkäisputket (top 3)\n/haetulos — hae tulos heti\n/setscore &lt;id&gt; &lt;k-v&gt; [koti|vieras] — aseta tulos (vain admin)\n/matchid — ottelutunnukset (vain admin)' +
       dmNote +
       '\n\nVeikkaa: ' + (process.env.NEXT_PUBLIC_APP_URL ?? ''),
     ).catch(console.error)
@@ -226,24 +231,31 @@ async function handleSetScore(chatId: number, telegramUserId: number, text: stri
     return
   }
 
-  // Parse: /setscore <id> <home>-<away>
+  // Parse: /setscore <id> <home>-<away> [koti|vieras]
+  // The koti/vieras suffix is required for a knockout-stage draw decided by
+  // extra time/penalties, to record who actually advanced.
   const parts = text.trim().split(/\s+/)
   const matchId = parseInt(parts[1] ?? '', 10)
   const scoreStr = parts[2] ?? ''
+  const winnerStr = (parts[3] ?? '').toLowerCase()
   const scoreMatch = scoreStr.match(/^(\d+)\s*[-–:]\s*(\d+)$/)
 
   if (isNaN(matchId) || !scoreMatch) {
-    await sendMessage(chatId, '⚠️ Käyttö: /setscore &lt;ottelu-id&gt; &lt;koti-vieras&gt;\nEsim: /setscore 42 2-1')
+    await sendMessage(chatId, '⚠️ Käyttö: /setscore &lt;ottelu-id&gt; &lt;koti-vieras&gt; [koti|vieras]\nEsim: /setscore 42 2-1\nJatkoaika/rangaistuspotkut: /setscore 87 1-1 koti')
     return
   }
 
   const homeScore = parseInt(scoreMatch[1], 10)
   const awayScore = parseInt(scoreMatch[2], 10)
 
+  let winnerTeam: 'HOME' | 'AWAY' | undefined
+  if (winnerStr === 'koti') winnerTeam = 'HOME'
+  else if (winnerStr === 'vieras') winnerTeam = 'AWAY'
+
   // Verify match exists
   const { data: match } = await admin
     .from('matches')
-    .select('id, home_team, away_team')
+    .select('id, home_team, away_team, stage')
     .eq('id', matchId)
     .single()
 
@@ -252,12 +264,17 @@ async function handleSetScore(chatId: number, telegramUserId: number, text: stri
     return
   }
 
+  if (match.stage !== 'GROUP_STAGE' && homeScore === awayScore && !winnerTeam) {
+    await sendMessage(chatId, '⚠️ Jatkopeli päättyi tasan — kerro kuka eteni jatkoon: /setscore ' + matchId + ' ' + scoreStr + ' koti (tai vieras)')
+    return
+  }
+
   const homeFi = getCountry(match.home_team).name
   const awayFi = getCountry(match.away_team).name
 
   await sendMessage(chatId, `⏳ Asetetaan tulos ${homeFi} – ${awayFi}: ${homeScore}–${awayScore}…`)
 
-  const { scored, error } = await scoreMatchAndNotify(admin, matchId, homeScore, awayScore)
+  const { scored, error } = await scoreMatchAndNotify(admin, matchId, homeScore, awayScore, winnerTeam)
 
   if (error) {
     await sendMessage(chatId, `⚠️ Virhe: ${error}`)
