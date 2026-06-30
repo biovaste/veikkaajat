@@ -10,6 +10,8 @@ export default function PlayoffBracket({ matches }: { matches: BracketMatchInput
   if (!layout) return null
 
   const { size, center, nodes, paths, dots, champion } = layout
+  const outerNodes = nodes.filter((node) => node.ring === 0)
+  const innerFlagNodes = nodes.filter((node) => node.ring > 0 && node.team !== 'TBD' && getCountry(node.team).code)
 
   return (
     <div className="space-y-2">
@@ -31,6 +33,14 @@ export default function PlayoffBracket({ matches }: { matches: BracketMatchInput
             <filter id="bracketSoftShadow" x="-30%" y="-30%" width="160%" height="160%">
               <feDropShadow dx="0" dy="8" stdDeviation="10" floodColor="#92400e" floodOpacity="0.18" />
             </filter>
+            <filter id="bracketActiveGlow" x="-20%" y="-20%" width="140%" height="140%">
+              <feDropShadow dx="0" dy="0" stdDeviation="3" floodColor="#f59e0b" floodOpacity="0.55" />
+            </filter>
+            {innerFlagNodes.map((n, i) => (
+              <clipPath key={i} id={`inner-flag-${i}`}>
+                <circle cx={n.x} cy={n.y} r={13} />
+              </clipPath>
+            ))}
           </defs>
 
           <circle cx={center} cy={center} r={330} fill="none" stroke="#ebe6dc" strokeWidth={1} strokeDasharray="2 12" />
@@ -38,7 +48,7 @@ export default function PlayoffBracket({ matches }: { matches: BracketMatchInput
           <circle cx={center} cy={center} r={164} fill="none" stroke="#f2eadc" strokeWidth={1} strokeDasharray="2 9" />
           <circle cx={center} cy={center} r={150} fill="url(#bracketCenterGlow)" />
 
-          {paths.map((path, i) => (
+          {paths.filter((path) => !path.active).map((path, i) => (
             <path
               key={i}
               d={path.d}
@@ -47,7 +57,21 @@ export default function PlayoffBracket({ matches }: { matches: BracketMatchInput
               strokeWidth={path.kind === 'connector' ? 2.1 : 2.35}
               strokeLinecap="round"
               strokeLinejoin="round"
-              opacity={path.kind === 'connector' ? 0.7 : 0.86}
+              opacity={path.kind === 'connector' ? 0.52 : 0.68}
+            />
+          ))}
+
+          {paths.filter((path) => path.active).map((path, i) => (
+            <path
+              key={i}
+              d={path.d}
+              fill="none"
+              stroke="#f59e0b"
+              strokeWidth={path.kind === 'connector' ? 3.5 : 3.8}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              opacity={0.94}
+              filter="url(#bracketActiveGlow)"
             />
           ))}
 
@@ -57,14 +81,33 @@ export default function PlayoffBracket({ matches }: { matches: BracketMatchInput
               cx={dot.x}
               cy={dot.y}
               r={dot.r}
-              fill={dot.kind === 'winner' ? '#111827' : dot.eliminated ? '#cbd5e1' : '#475569'}
+              fill={dot.advancing ? '#f59e0b' : dot.kind === 'winner' ? '#111827' : dot.eliminated ? '#cbd5e1' : '#475569'}
               stroke="#fbfaf7"
               strokeWidth={1.4}
               opacity={dot.eliminated ? 0.52 : 1}
             />
           ))}
 
-          {nodes.filter((node) => node.ring === 0).map((n, i) => {
+          {innerFlagNodes.map((n, i) => {
+            const country = getCountry(n.team)
+            return (
+              <g key={i} opacity={n.eliminated ? 0.45 : 1}>
+                <circle cx={n.x} cy={n.y} r={15} fill="#fbfaf7" stroke={n.advancing ? '#f59e0b' : '#cbd5e1'} strokeWidth={2} />
+                <image
+                  href={`https://flagcdn.com/w40/${country.code}.png`}
+                  x={n.x - 17}
+                  y={n.y - 13}
+                  width={34}
+                  height={26}
+                  clipPath={`url(#inner-flag-${i})`}
+                  preserveAspectRatio="xMidYMid slice"
+                />
+                <circle cx={n.x} cy={n.y} r={13} fill="none" stroke="#fbfaf7" strokeWidth={1.4} />
+              </g>
+            )
+          })}
+
+          {outerNodes.map((n, i) => {
             const country = getCountry(n.team)
             const label = n.team === 'TBD' ? '?' : truncateLabel(country.name)
             const labelOffset = n.textAnchor === 'middle' ? 0 : n.textAnchor === 'start' ? 9 : -9
@@ -114,9 +157,8 @@ export default function PlayoffBracket({ matches }: { matches: BracketMatchInput
         <p className="text-center text-sm font-semibold">🏆 Maailmanmestari: {getCountry(champion).name}</p>
       )}
       <p className="text-xs leading-relaxed text-gray-400">
-        Himmennetty = pudonnut jatkosta. Yhdyslinjat ovat suuntaa-antavia (football-data.org ei kerro tasmallista lohkopuuta).
+        Himmennetty = pudonnut jatkosta. Kultainen reitti = ratkaistun ottelun voittajan eteneminen. Yhdyslinjat ovat suuntaa-antavia (football-data.org ei kerro tasmallista lohkopuuta).
       </p>
     </div>
   )
 }
-

@@ -43,6 +43,7 @@ export interface BracketLine {
 export interface BracketPath {
   d: string
   kind: 'branch' | 'connector' | 'final'
+  active?: boolean
 }
 
 export interface BracketDot {
@@ -98,6 +99,15 @@ function labelAnchor(angle: number): 'start' | 'middle' | 'end' {
   return angle > 90 || angle < -90 ? 'end' : 'start'
 }
 
+function arcPath(
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  radius: number,
+  sweep: 0 | 1,
+): string {
+  return `M ${pointCmd(from)} A ${fmt(radius)} ${fmt(radius)} 0 0 ${sweep} ${pointCmd(to)}`
+}
+
 export function buildBracketLayout(matches: BracketMatchInput[]): BracketLayout | null {
   const stages = STAGE_ORDER.filter((s) => matches.some((m) => m.stage === s))
   if (stages.length === 0) return null
@@ -139,7 +149,7 @@ export function buildBracketLayout(matches: BracketMatchInput[]): BracketLayout 
         { team: m.home_team, won: homeWon },
         { team: m.away_team, won: awayWon },
       ]
-      const matchPoints: { outer: { x: number; y: number }; inner: { x: number; y: number } }[] = []
+      const matchPoints: { outer: { x: number; y: number }; inner: { x: number; y: number }; won: boolean }[] = []
 
       sides.forEach((side, si) => {
         const slotIndex = mi * 2 + si
@@ -174,7 +184,7 @@ export function buildBracketLayout(matches: BracketMatchInput[]): BracketLayout 
           eliminated,
           advancing: side.won,
         })
-        matchPoints.push({ outer, inner })
+        matchPoints.push({ outer, inner, won: side.won })
 
         if (ringIdx < stages.length - 1) {
           const nextRadius = outerRadius - (ringIdx + 1) * ringGap
@@ -200,6 +210,14 @@ export function buildBracketLayout(matches: BracketMatchInput[]): BracketLayout 
           kind: 'final',
           d: `M ${pointCmd(matchPoints[0].outer)} L ${pointCmd(matchPoints[0].inner)} M ${pointCmd(matchPoints[1].outer)} L ${pointCmd(matchPoints[1].inner)}`,
         })
+        const winner = matchPoints.find((point) => point.won)
+        if (winner) {
+          paths.push({
+            kind: 'final',
+            active: true,
+            d: `M ${pointCmd(winner.outer)} L ${pointCmd(winner.inner)}`,
+          })
+        }
         dots.push({ x: matchPoints[0].inner.x, y: matchPoints[0].inner.y, r: 4.2, kind: 'winner' })
         dots.push({ x: matchPoints[1].inner.x, y: matchPoints[1].inner.y, r: 4.2, kind: 'winner' })
       } else {
@@ -212,9 +230,21 @@ export function buildBracketLayout(matches: BracketMatchInput[]): BracketLayout 
             `M ${pointCmd(matchPoints[1].inner)} L ${pointCmd(matchPoints[1].outer)}`,
           ].join(' '),
         })
+        const winnerIndex = matchPoints.findIndex((point) => point.won)
+        if (winnerIndex >= 0) {
+          const winner = matchPoints[winnerIndex]
+          paths.push({
+            kind: 'branch',
+            active: true,
+            d: [
+              `M ${pointCmd(winner.outer)} L ${pointCmd(winner.inner)}`,
+              arcPath(winner.inner, mid, branchRadius, winnerIndex === 0 ? 1 : 0),
+            ].join(' '),
+          })
+        }
         dots.push({ x: matchPoints[0].inner.x, y: matchPoints[0].inner.y, r: 3.4, kind: 'junction' })
         dots.push({ x: matchPoints[1].inner.x, y: matchPoints[1].inner.y, r: 3.4, kind: 'junction' })
-        dots.push({ x: mid.x, y: mid.y, r: 4.2, kind: 'winner' })
+        dots.push({ x: mid.x, y: mid.y, r: 4.2, kind: 'winner', advancing: winnerIndex >= 0 })
 
         if (ringIdx < stages.length - 1) {
           const nextRadius = outerRadius - (ringIdx + 1) * ringGap
@@ -226,10 +256,9 @@ export function buildBracketLayout(matches: BracketMatchInput[]): BracketLayout 
           const controlRadius = (branchRadius + nextRadius) / 2
           const controlAngle = midAngle + (nextAngle - midAngle) * 0.45
           const control = polar(center, controlRadius, controlAngle)
-          paths.push({
-            kind: 'connector',
-            d: `M ${pointCmd(mid)} Q ${pointCmd(control)} ${pointCmd(target)}`,
-          })
+          const connectorPath = `M ${pointCmd(mid)} Q ${pointCmd(control)} ${pointCmd(target)}`
+          paths.push({ kind: 'connector', d: connectorPath })
+          if (finished) paths.push({ kind: 'connector', active: true, d: connectorPath })
         }
       }
     })
@@ -247,4 +276,3 @@ export function buildBracketLayout(matches: BracketMatchInput[]): BracketLayout 
 
   return { size, center, nodes, lines, paths, dots, champion }
 }
-

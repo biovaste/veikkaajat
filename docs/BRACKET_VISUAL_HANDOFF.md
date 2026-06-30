@@ -11,6 +11,8 @@ Make the playoff bracket read like a polished circular knockout tree, closer to 
 - teams arranged around an even outer circle
 - visible pair branches instead of long straight spokes
 - junction dots at each merge point
+- illuminated winner paths for completed matches
+- circular flag markers for resolved inner-round teams
 - clearer center trophy/champion area
 - readable labels and flags around the perimeter
 
@@ -38,7 +40,7 @@ Use native SVG geometry, not generated bitmap art, for the web app. SVG gives sh
 - Run `npm run build`.
 - Open `/leaderboard` with knockout matches present.
 - Check desktop and mobile widths.
-- Confirm no label overlaps the center trophy or important branch lines.
+- Confirm no label or inner flag overlaps the center trophy or important branch lines.
 - Confirm outer ring spacing feels even with 32-team and partial knockout data.
 - Confirm `/jatkokaavio` is unchanged for now.
 
