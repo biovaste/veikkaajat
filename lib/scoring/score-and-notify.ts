@@ -7,12 +7,19 @@ import { sendResultMessage, type LeaderboardRow, type PlayerInfo } from '../tele
  * Telegram result message. Safe to call multiple times — scoring_log rows
  * are deleted and re-inserted so points don't stack.
  */
+export interface ResultBreakdown {
+  duration?: 'REGULAR' | 'EXTRA_TIME' | 'PENALTY_SHOOTOUT'
+  extraTime?: { home: number; away: number } | null
+  penalties?: { home: number; away: number } | null
+}
+
 export async function scoreMatchAndNotify(
   admin: SupabaseClient,
   matchId: number,
   homeScore: number,
   awayScore: number,
   winnerTeam?: 'HOME' | 'AWAY',
+  breakdown?: ResultBreakdown,
 ): Promise<{ scored: number; error?: string }> {
   // Snapshot leaderboard BEFORE scoring this match (exclude current match's log)
   const [{ data: prevLog }, { data: catBets }] = await Promise.all([
@@ -41,7 +48,8 @@ export async function scoreMatchAndNotify(
 
   // Update match result. winner_team (HOME/AWAY) records who actually advanced for
   // knockout matches decided by extra time/penalties — never fed into point scoring,
-  // which always uses the 90-minute home_score/away_score above.
+  // which always uses the 90-minute home_score/away_score above. extra_time_*/
+  // penalties_*/result_duration are the ET/penalty breakdown, stored for display only.
   await admin.from('matches').update({
     home_score: homeScore,
     away_score: awayScore,
@@ -49,6 +57,10 @@ export async function scoreMatchAndNotify(
     result_confirmed_at: new Date().toISOString(),
     needs_manual_score: false,
     ...(winnerTeam ? { winner_team: winnerTeam } : {}),
+    ...(breakdown?.duration ? { result_duration: breakdown.duration } : {}),
+    ...(breakdown?.duration && breakdown.duration !== 'REGULAR' ? { went_to_extra_time: true } : {}),
+    ...(breakdown?.extraTime ? { extra_time_home: breakdown.extraTime.home, extra_time_away: breakdown.extraTime.away } : {}),
+    ...(breakdown?.penalties ? { penalties_home: breakdown.penalties.home, penalties_away: breakdown.penalties.away } : {}),
   }).eq('id', matchId)
 
   const { data: predictions, error: predError } = await admin
@@ -118,7 +130,7 @@ export async function scoreMatchAndNotify(
 
   const { data: matchRow } = await admin
     .from('matches')
-    .select('id, home_team, away_team, kickoff_at, home_score, away_score')
+    .select('id, home_team, away_team, kickoff_at, home_score, away_score, result_duration, extra_time_home, extra_time_away, penalties_home, penalties_away')
     .eq('id', matchId)
     .single()
 

@@ -111,33 +111,51 @@ async function resolveFsIds(db: Db, matches: { id: number; home_team: string; aw
   }
 }
 
-/**
- * football-data.org's score.fullTime for a match that went to extra time is the
- * *final* match score (it can include extra-time goals), not the 90-minute score
- * our scoring rules require — and there's no separate 90-minute-only field. So
- * those matches are never auto-scored; flag them and DM the admins to score them
- * manually (with the real 90-minute score) via /admin/matches.
- */
-async function flagForManualScoring(
-  db: Db,
-  match: { id: number; home_team: string; away_team: string },
-  winnerTeam: 'HOME' | 'AWAY' | null,
-  adminChatIds: string[],
-) {
-  await db.from('matches').update({
-    went_to_extra_time: true,
-    needs_manual_score: true,
-    ...(winnerTeam ? { winner_team: winnerTeam } : {}),
-  }).eq('id', match.id)
+// deno-lint-ignore no-explicit-any
+type FdScore = any
 
-  const text = `⚠️ <b>${match.home_team} – ${match.away_team}</b> päättyi jatkoajalla/rangaistuspotkuilla — ` +
-    `pisteytä käsin 90 min tuloksella osoitteessa /admin/matches.`
-  for (const chatId of adminChatIds) {
-    await tgSend(chatId, text)
-  }
+interface RegularTimeScore {
+  home: number
+  away: number
+  winnerTeam: 'HOME' | 'AWAY' | null
+  duration: string
+  extraTime: { home: number; away: number } | null
+  penalties: { home: number; away: number } | null
+}
+
+/**
+ * football-data.org v4 exposes score.regularTime (the 90-minute score) for
+ * knockout matches alongside score.extraTime / score.penalties — so those
+ * matches are auto-scored the same as any other, using regularTime instead of
+ * fullTime (the final aggregate, which would over-count ET/penalty goals).
+ * Returns null when the 90-minute score isn't available yet — the match stays
+ * in-flight and is retried on the next poll.
+ */
+function pickRegularTimeScore(score: FdScore): RegularTimeScore | null {
+  const duration: string = score?.duration ?? 'REGULAR'
+  const isKnockout = duration !== 'REGULAR'
+  const source = isKnockout ? score?.regularTime : score?.fullTime
+  if (source?.home == null || source?.away == null) return null
+
+  const winner: string | null = score?.winner ?? null
+  const winnerTeam = winner === 'HOME_TEAM' ? 'HOME' : winner === 'AWAY_TEAM' ? 'AWAY' : null
+  const extraTime = isKnockout && score?.extraTime?.home != null && score?.extraTime?.away != null
+    ? { home: score.extraTime.home, away: score.extraTime.away } : null
+  const penalties = duration === 'PENALTY_SHOOTOUT' && score?.penalties?.home != null && score?.penalties?.away != null
+    ? { home: score.penalties.home, away: score.penalties.away } : null
+
+  return { home: source.home, away: source.away, winnerTeam, duration, extraTime, penalties }
 }
 
 // ─── Telegram result message ──────────────────────────────────────────────────
+
+function resultDurationSuffix(match: { result_duration?: string | null; penalties_home?: number | null; penalties_away?: number | null }) {
+  if (match.result_duration === 'PENALTY_SHOOTOUT' && match.penalties_home != null && match.penalties_away != null) {
+    return ` (rangaistuspotkut ${match.penalties_home}–${match.penalties_away})`
+  }
+  if (match.result_duration === 'EXTRA_TIME') return ' (jatkoaika)'
+  return ''
+}
 
 async function sendResultMessage(
   db: ReturnType<typeof createClient>,
@@ -147,7 +165,7 @@ async function sendResultMessage(
 ) {
   const { data: match } = await db
     .from('matches')
-    .select('home_team, away_team')
+    .select('home_team, away_team, result_duration, penalties_home, penalties_away')
     .eq('id', matchId)
     .single()
   if (!match) return
@@ -194,7 +212,7 @@ async function sendResultMessage(
   const sortedPreds = [...(preds ?? [])].sort((a, b) => (b.points ?? 0) - (a.points ?? 0))
 
   let text = `⚽ <b>${match.home_team} – ${match.away_team}</b>\n`
-  text += `Tulos: <tg-spoiler><b>${homeScore}–${awayScore}</b>\n\n<b>Pisteet:</b>\n`
+  text += `Tulos: <tg-spoiler><b>${homeScore}–${awayScore}</b>${resultDurationSuffix(match)}\n\n<b>Pisteet:</b>\n`
   for (const pred of sortedPreds) {
     text += `${nameMap[pred.user_id] ?? '?'}: ${pred.points ?? 0} p (veikkaus ${pred.home_score_pred}–${pred.away_score_pred})\n`
   }
@@ -236,8 +254,6 @@ Deno.serve(async (_req) => {
     .limit(10)
 
   let scored = 0
-  // Admin chat ids for manual-scoring alerts, fetched lazily at most once per run
-  let adminChatIds: string[] | undefined
 
   for (const match of matches ?? []) {
     try {
@@ -255,30 +271,17 @@ Deno.serve(async (_req) => {
       const status: string = fdMatch.status
 
       if (status === 'FINISHED') {
-        const duration: string | undefined = fdMatch.score?.duration
-        if (duration && duration !== 'REGULAR') {
-          const winner: string | null = fdMatch.score?.winner ?? null
-          const winnerTeam = winner === 'HOME_TEAM' ? 'HOME' : winner === 'AWAY_TEAM' ? 'AWAY' : null
-          if (adminChatIds === undefined) {
-            const { data: admins } = await db
-              .from('profiles')
-              .select('telegram_chat_id')
-              .eq('is_admin', true)
-              .not('telegram_chat_id', 'is', null)
-            adminChatIds = (admins ?? []).map((a: { telegram_chat_id: string }) => a.telegram_chat_id)
-          }
-          await flagForManualScoring(db, match, winnerTeam, adminChatIds)
+        const reg = pickRegularTimeScore(fdMatch.score)
+
+        if (!reg) {
+          // Knockout match finished but regularTime hasn't appeared yet —
+          // wait for the next poll rather than guessing from fullTime.
           await sleep(7000)
           continue
         }
 
-        const homeScore: number = fdMatch.score?.fullTime?.home ?? null
-        const awayScore: number = fdMatch.score?.fullTime?.away ?? null
-
-        if (homeScore === null || awayScore === null) {
-          await sleep(7000)
-          continue
-        }
+        const homeScore = reg.home
+        const awayScore = reg.away
 
         // Fetch xG from Flashscore (best-effort, non-fatal; backfill pass retries)
         let xgUpdate: Record<string, number> = {}
@@ -292,13 +295,18 @@ Deno.serve(async (_req) => {
           xgUpdate = { ...xgUpdate, fs_xg_attempts: (match.fs_xg_attempts ?? 0) + 1 }
         }
 
-        // Update match result + optional xG
+        // Update match result + optional xG + ET/penalty breakdown (display only —
+        // point scoring below always uses homeScore/awayScore, the 90-min score)
         await db.from('matches').update({
           home_score: homeScore,
           away_score: awayScore,
           status: 'FINISHED',
           result_confirmed_at: new Date().toISOString(),
           ...xgUpdate,
+          ...(reg.winnerTeam ? { winner_team: reg.winnerTeam } : {}),
+          ...(reg.duration !== 'REGULAR' ? { went_to_extra_time: true, result_duration: reg.duration } : {}),
+          ...(reg.extraTime ? { extra_time_home: reg.extraTime.home, extra_time_away: reg.extraTime.away } : {}),
+          ...(reg.penalties ? { penalties_home: reg.penalties.home, penalties_away: reg.penalties.away } : {}),
         }).eq('id', match.id)
 
         // Fetch all predictions

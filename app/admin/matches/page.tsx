@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { formatDate, stageLabel } from '@/lib/utils'
+import { formatDate, stageLabel, resultDurationSuffix } from '@/lib/utils'
 
 interface Match {
   id: number
@@ -17,6 +17,9 @@ interface Match {
   needs_manual_score: boolean
   went_to_extra_time: boolean
   winner_team: 'HOME' | 'AWAY' | null
+  result_duration: string | null
+  penalties_home: number | null
+  penalties_away: number | null
 }
 
 function OverrideForm({ match, onDone }: { match: Match; onDone: () => void }) {
@@ -172,6 +175,9 @@ export default function AdminMatchesPage() {
                 {m.home_score !== null && m.away_score !== null && (
                   <span className="font-bold text-sm text-green-700">
                     {m.home_score}–{m.away_score}
+                    {resultDurationSuffix(m) && (
+                      <span className="block font-normal text-[10px] text-gray-400">{resultDurationSuffix(m).trim()}</span>
+                    )}
                   </span>
                 )}
               </div>

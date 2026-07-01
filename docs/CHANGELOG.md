@@ -115,6 +115,19 @@
 - **`mv_player_match_log` materialized view** (migration 0025): backs `/leaderboard`'s stats query; refreshed from `lib/scoring/score-and-notify.ts` after every scoring event
 - **`fetchTopScorers()` 2-minute cache**: added once `/leaderboard` started calling it on every `force-dynamic` page load to detect eliminated Top Scorer picks (football-data.org's free tier is rate-limited to 10 req/min)
 
+### ✅ Phase 5i — Auto-score extra time / penalties (migration 0027)
+- Discovered football-data.org v4 exposes `score.regularTime` (the 90-minute score) plus
+  `score.extraTime`/`score.penalties` for knockout matches — previously only `score.fullTime` (the
+  final aggregate) was read, so ET/penalty matches were flagged for manual admin scoring
+- `pickRegularTimeScore()` (`lib/football-data/regular-time.ts`, unit-tested; mirrored inline in the
+  `poll-match-results` edge function since it's Deno) now auto-scores these matches off `regularTime`,
+  fills `winner_team` from `score.winner`, and stores the ET/penalty breakdown in
+  `extra_time_home/away` / `penalties_home/away` / `result_duration` for display only
+- Manual scoring via `/admin/matches` / `/setscore` remains as a fallback if football-data.org data is
+  ever wrong or missing
+- Displayed as a suffix (e.g. "(rangaistuspotkut 4–3)") on `MatchCard`, `/admin/matches`,
+  `/my-predictions`, and the Telegram result message
+
 ### 🔲 Phase 6 — UI Polish
 - Responsive pass on all pages
 - Finnish copy audit

@@ -1,4 +1,4 @@
-import { formatDate } from '@/lib/utils'
+import { formatDate, resultDurationSuffix } from '@/lib/utils'
 import { getCountry, flagUrl, groupLabel } from '@/lib/countries'
 import CountdownTimer from './CountdownTimer'
 import PredictionForm from './PredictionForm'
@@ -12,6 +12,9 @@ interface Match {
   home_score: number | null
   away_score: number | null
   group_name: string | null
+  result_duration?: string | null
+  penalties_home?: number | null
+  penalties_away?: number | null
 }
 
 interface Prediction {
@@ -72,7 +75,12 @@ export default function MatchCard({ match, prediction }: Props) {
 
         <div className="text-right shrink-0">
           {hasResult ? (
-            <span className="font-bold text-sm">{match.home_score}–{match.away_score}</span>
+            <span className="font-bold text-sm">
+              {match.home_score}–{match.away_score}
+              {resultDurationSuffix(match) && (
+                <span className="block font-normal text-[10px] text-gray-400">{resultDurationSuffix(match).trim()}</span>
+              )}
+            </span>
           ) : isCancelled ? (
             <span className="text-xs bg-red-100 text-red-700 rounded px-1.5 py-0.5">Peruttu</span>
           ) : isPostponed ? (

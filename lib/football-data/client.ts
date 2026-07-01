@@ -24,6 +24,11 @@ export interface FDMatch {
     winner: 'HOME_TEAM' | 'AWAY_TEAM' | 'DRAW' | null
     duration: 'REGULAR' | 'EXTRA_TIME' | 'PENALTY_SHOOTOUT'
     fullTime: { home: number | null; away: number | null }
+    // Present for knockout matches (v4): the 90-minute score, and the goals
+    // scored in extra time / the penalty shootout result, respectively.
+    regularTime?: { home: number | null; away: number | null }
+    extraTime?: { home: number | null; away: number | null }
+    penalties?: { home: number | null; away: number | null }
   }
 }
 

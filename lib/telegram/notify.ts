@@ -1,5 +1,6 @@
 import { createServiceRoleClient } from '@/lib/supabase/server'
 import { sendMessage, sendMessageWithMarkup, sendPhoto, sendPhotoBuffer, sendPhotoBytes, getQuickChartUrl } from './bot'
+import { resultDurationSuffix } from '../utils'
 import { getCountry } from '../countries'
 import { isWildcard, wildcardCountry } from '../players'
 import { calculatePoints } from '../scoring/engine'
@@ -35,6 +36,11 @@ export interface MatchInfo {
   kickoff_at: string
   home_score: number
   away_score: number
+  result_duration?: 'REGULAR' | 'EXTRA_TIME' | 'PENALTY_SHOOTOUT' | null
+  extra_time_home?: number | null
+  extra_time_away?: number | null
+  penalties_home?: number | null
+  penalties_away?: number | null
 }
 
 export interface PredictionRow {
@@ -98,7 +104,7 @@ export async function sendResultMessage(
   const sorted = [...predictions].sort((a, b) => b.points - a.points)
 
   let text = `⚽ <b>${match.home_team} – ${match.away_team}</b>\n`
-  text += `Tulos: <tg-spoiler><b>${match.home_score}–${match.away_score}</b>\n\n`
+  text += `Tulos: <tg-spoiler><b>${match.home_score}–${match.away_score}</b>${resultDurationSuffix(match)}\n\n`
   text += '<b>Pisteet:</b>\n'
 
   for (const pred of sorted) {

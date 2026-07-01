@@ -22,6 +22,19 @@ export function stageLabel(stage: string): string {
   return labels[stage] ?? stage
 }
 
+/** Finnish suffix describing how a knockout match was decided, e.g. " (rangaistuspotkut 4–3)". */
+export function resultDurationSuffix(match: {
+  result_duration?: string | null
+  penalties_home?: number | null
+  penalties_away?: number | null
+}): string {
+  if (match.result_duration === 'PENALTY_SHOOTOUT' && match.penalties_home != null && match.penalties_away != null) {
+    return ` (rangaistuspotkut ${match.penalties_home}–${match.penalties_away})`
+  }
+  if (match.result_duration === 'EXTRA_TIME') return ' (jatkoaika)'
+  return ''
+}
+
 export function resultLabel(home: number, away: number): string {
   if (home > away) return 'K'   // kotijoukkue voittaa
   if (away > home) return 'V'   // vierasjoukkue voittaa

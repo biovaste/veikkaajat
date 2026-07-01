@@ -1,6 +1,6 @@
 # Database Schema
 
-All tables are in `supabase/migrations/` (currently `0001`–`0026`, applied in order via the Supabase SQL editor or the Supabase MCP `apply_migration` tool).
+All tables are in `supabase/migrations/` (currently `0001`–`0027`, applied in order via the Supabase SQL editor or the Supabase MCP `apply_migration` tool).
 
 | Table | Purpose |
 |---|---|
@@ -21,6 +21,7 @@ All tables are in `supabase/migrations/` (currently `0001`–`0026`, applied in 
 - `matches.category_bets_posted` — boolean; set true after special bets for this match's group/tournament have been posted to Telegram (migration 0014)
 - `matches.home_odds`, `matches.draw_odds`, `matches.away_odds` — decimal odds from TheRundown, fetched around kickoff message time (migration 0020)
 - `matches.winner_team` ('HOME'|'AWAY'|NULL), `matches.went_to_extra_time`, `matches.needs_manual_score` — extra-time/penalty handling; see CLAUDE.md "Extra time / penalties" (migration 0023)
+- `matches.result_duration` ('REGULAR'|'EXTRA_TIME'|'PENALTY_SHOOTOUT'|NULL), `matches.extra_time_home/away`, `matches.penalties_home/away` — the ET/penalty breakdown from `score.regularTime`/`extraTime`/`penalties`, stored for display only, never fed into point scoring (migration 0027)
 - `fs_requests` table — log of every Flashscore API call, enforces the 500/month hard limit
 - `streak_seeds` table — pre-tournament streak values per player per type; `unique(display_name, streak_type)`; `streak_type` in ('correct_5p','right_result','wrong_result','zero_p','non_zero_p','non_5p') (migration 0014); `hist_best` column (migration 0022) caches the all-time-best value from archived tournaments so a new tournament's streaks can't erase a historical record
 - `mv_player_match_log` — materialized view (`scoring_log` ⋈ `matches`), backs `/leaderboard`'s stats; refresh via `refresh_mv_player_match_log()` RPC (migration 0025)

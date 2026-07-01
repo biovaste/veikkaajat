@@ -312,7 +312,7 @@ async function handleVeikkaukset(chatId: number, telegramUserId: number): Promis
     .from('matches')
     .select('id, home_team, away_team, kickoff_at')
     .gt('kickoff_at', deadline5min.toISOString())
-    .eq('status', 'SCHEDULED')
+    .in('status', ['SCHEDULED', 'TIMED'])
     .order('kickoff_at', { ascending: true })
     .limit(5)
 

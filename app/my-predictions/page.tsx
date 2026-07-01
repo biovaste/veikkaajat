@@ -1,6 +1,6 @@
 import { createServerClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import { formatDate } from '@/lib/utils'
+import { formatDate, resultDurationSuffix } from '@/lib/utils'
 import { getCountry, flagUrl, groupLabel } from '@/lib/countries'
 import { isWildcard, wildcardCountry } from '@/lib/players'
 
@@ -20,7 +20,7 @@ export default async function MyPredictionsPage() {
   ] = await Promise.all([
     supabase
       .from('predictions')
-      .select('*, matches(home_team, away_team, kickoff_at, home_score, away_score, status)')
+      .select('*, matches(home_team, away_team, kickoff_at, home_score, away_score, status, result_duration, penalties_home, penalties_away)')
       .eq('user_id', user.id)
       .order('matches(kickoff_at)', { ascending: true }),
     supabase
@@ -98,7 +98,7 @@ export default async function MyPredictionsPage() {
             <div className="text-sm font-bold">{p.home_score_pred}–{p.away_score_pred}</div>
             {hasResult && (
               <div className="text-xs text-gray-400">
-                Tulos: {match.home_score}–{match.away_score}
+                Tulos: {match.home_score}–{match.away_score}{resultDurationSuffix(match)}
               </div>
             )}
             {p.points !== null && (

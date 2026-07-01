@@ -11,8 +11,10 @@
 Competition code: `WC`. Auth header: `X-Auth-Token`.
 
 `score.duration` ('REGULAR'|'EXTRA_TIME'|'PENALTY_SHOOTOUT') and `score.winner` ('HOME_TEAM'|'AWAY_TEAM'|'DRAW'|null)
-are read alongside `score.fullTime` to detect and flag matches that can't be auto-scored — see
-CLAUDE.md "Extra time / penalties".
+are read alongside `score.fullTime`. For knockout matches (`duration !== 'REGULAR'`), v4 also exposes
+`score.regularTime` (the 90-minute score) and `score.extraTime`/`score.penalties` (goals scored in
+ET / the shootout result) — these are what let the app auto-score ET/penalty matches without manual
+admin entry. See CLAUDE.md "Extra time / penalties".
 
 ## Flashscore via RapidAPI (xG + fast results)
 

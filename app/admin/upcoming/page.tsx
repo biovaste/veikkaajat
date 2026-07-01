@@ -21,7 +21,7 @@ export default async function UpcomingPage() {
     admin
       .from('matches')
       .select('id, home_team, away_team, kickoff_at, group_name')
-      .eq('status', 'SCHEDULED')
+      .in('status', ['SCHEDULED', 'TIMED'])
       .is('home_score', null)
       .gt('kickoff_at', kickoffFrom.toISOString())
       .lte('kickoff_at', kickoffTo.toISOString())
