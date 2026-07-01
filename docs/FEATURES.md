@@ -44,28 +44,43 @@ once any knockout-stage match exists.
 ## Playoff Bracket
 
 `lib/bracket-geometry.ts` (`buildBracketLayout()`) computes a circular bracket layout from `matches`
-rows alone — no React/JSX, shared by both renderers. It exposes both a legacy simple shape (`lines`)
-and a richer shape (`paths` + `dots`) built from the same underlying node positions:
+rows alone — no React/JSX, shared by both renderers. It exposes team `dots` (per ring) and two kinds
+of `paths` (see below) built from the underlying node positions:
 
 - **Rings** (outer → inner): whichever of `LAST_32 → LAST_16 → QUARTER_FINALS → SEMI_FINALS → FINAL` have
   at least one match seeded. Each match in a ring occupies two "team slots" (home, away); a ring with N
   matches has 2N slots evenly spaced around the circle.
-- **Bracket adjacency is a structural approximation**: slot *i* in one ring pairs with slot ⌊i/2⌋ in the
-  next ring inward (clamped to that ring's slot count), since football-data.org doesn't expose which
-  match's winner plays which next match — only `stage` + `kickoff_at`. Team labels are always accurate
-  (they come straight from the match rows); only which branch a given team's node connects to is a guess.
-- **Elimination styling**: a finished match's loser is dimmed; the winner (by score, or by `winner_team`
-  for a draw) is highlighted, with its path to the next round drawn as a glowing amber line. The champion
-  (final match winner) shows in the center trophy circle.
-- **Web** (`components/PlayoffBracket.tsx`, used on `/leaderboard`): renders `paths` (curved branch/connector
-  SVG paths between each match pair, converging inward) and `dots` (team/junction/winner markers) for a
-  polished circular knockout-tree look, with flag images (`flagcdn.com`) around the outer ring and as
-  clipped circles on resolved inner-ring teams. Labels stay upright (not rotated around the circle).
-  In-progress design notes: `docs/BRACKET_VISUAL_HANDOFF.md`.
-- **Telegram** (`lib/telegram/bracket-image.tsx`, sent by `/jatkokaavio`): still renders the older, simpler
-  `lines` shape via `next/og`'s `ImageResponse` (Satori) — no flag images (fetching ~30 remote images
-  server-side during PNG generation is slow and failure-prone), country names only. Not yet redesigned to
-  match the web renderer's newer look.
+- **Bracket adjacency**: football-data.org exposes no field for "which match's winner plays which next
+  match" — only `stage`, `external_id`, `kickoff_at`. Verified against real WC 2026 data that sorting each
+  stage by `external_id` ascending (not `kickoff_at`, which reorders unpredictably relative to the bracket)
+  reliably groups the two matches that feed the same next-round match as a consecutive pair — so `mi`/`mi^1`
+  pairing within a stage is correct. But there's no reliable arithmetic rule for *which* next-round slot a
+  pair feeds (confirmed wrong in practice: a pair can feed a next-round match sitting at a completely
+  different array index, putting its dot on the opposite side of the circle from its own feeder pair).
+  `orderStageByParent()` fixes this by reordering each ring, pair by pair, from the outside in: once a pair's
+  match is `FINISHED`, its winner's name is looked up in the next stage's matches and that pair's next-round
+  slot is pinned to wherever the winner actually appears; unresolved pairs get whatever slot is left over.
+  This makes the existing `mi` pairs with `mi^1` into next round's match `floor(mi/2)` arithmetic exactly
+  correct (by construction) rather than a guess, and keeps a resolved team's dot radially aligned with the
+  pair that produced it.
+- **Two path kinds, no merge/junction**: a gray `'pairing'` arc bows gently inward between every match's two
+  team dots (drawn for every match, decided or not — it's just showing who plays whom, never a guess). An
+  amber `'advance'` path is drawn only once a match is decided: a single line straight from the winner's own
+  dot in this ring to that same team's dot in the next ring (where its flag circle is drawn), with no
+  junction — once that next match is also decided, another `'advance'` path continues straight from there to
+  the round after, and so on until the final feeds into the center trophy. The champion (final match winner)
+  shows in the center trophy circle.
+- **Web** (`components/PlayoffBracket.tsx`, used on `/leaderboard`): renders `paths` (amber SVG curves) and
+  `dots` (team markers) for a polished circular knockout-tree look, with flag images (`flagcdn.com`) around
+  the outer ring and as clipped circles on resolved inner-ring teams. Labels stay upright (not rotated
+  around the circle).
+- **Telegram** (`lib/telegram/bracket-image.tsx`, sent by `/jatkokaavio`): renders the same `paths`/`dots`
+  via `next/og`'s `ImageResponse` (Satori), matching the web design's colors and clipped flag circles on
+  resolved inner-ring teams. The outer ring stays text (country name) only — 32 flag fetches there would be
+  the slow/failure-prone case; ~16 inner-ring fetches at most is fine. Satori can't mix SVG `<text>` with SVG
+  `defs`/`filter`/gradients in the same `<svg>` subtree, so all graphics (paths/dots/gradient/filters/inner
+  flags) render in one text-free `<svg>` layer and every text label is a separately absolutely-positioned
+  `<div>` on top.
 
 ## Elimination Detection
 

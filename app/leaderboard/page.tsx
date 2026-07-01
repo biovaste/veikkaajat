@@ -42,7 +42,7 @@ export default async function LeaderboardPage() {
     srSupabase.from('predictions').select('user_id, home_score_pred, away_score_pred, match_id, matches(home_score, away_score, status)'),
     supabase.from('matches').select('id, home_xg, away_xg').not('home_xg', 'is', null).not('away_xg', 'is', null),
     supabase.from('matches').select('kickoff_at').order('kickoff_at', { ascending: true }).limit(1).maybeSingle(),
-    supabase.from('matches').select('home_team, away_team, home_score, away_score, winner_team, stage, status, kickoff_at'),
+    supabase.from('matches').select('external_id, home_team, away_team, home_score, away_score, winner_team, stage, status, kickoff_at'),
     supabase.from('category_bets').select('user_id, category, bet_value').in('category', ['WORLD_CHAMPION', 'TOP_SCORER']),
   ])
 

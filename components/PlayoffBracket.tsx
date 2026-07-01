@@ -48,26 +48,26 @@ export default function PlayoffBracket({ matches }: { matches: BracketMatchInput
           <circle cx={center} cy={center} r={164} fill="none" stroke="#f2eadc" strokeWidth={1} strokeDasharray="2 9" />
           <circle cx={center} cy={center} r={150} fill="url(#bracketCenterGlow)" />
 
-          {paths.filter((path) => !path.active).map((path, i) => (
+          {paths.filter((path) => path.kind === 'pairing').map((path, i) => (
             <path
               key={i}
               d={path.d}
               fill="none"
-              stroke={path.kind === 'connector' ? '#4b5563' : '#374151'}
-              strokeWidth={path.kind === 'connector' ? 2.1 : 2.35}
+              stroke="#374151"
+              strokeWidth={2.35}
               strokeLinecap="round"
               strokeLinejoin="round"
-              opacity={path.kind === 'connector' ? 0.52 : 0.68}
+              opacity={0.68}
             />
           ))}
 
-          {paths.filter((path) => path.active).map((path, i) => (
+          {paths.filter((path) => path.kind === 'advance').map((path, i) => (
             <path
               key={i}
               d={path.d}
               fill="none"
               stroke="#f59e0b"
-              strokeWidth={path.kind === 'connector' ? 3.5 : 3.8}
+              strokeWidth={3.8}
               strokeLinecap="round"
               strokeLinejoin="round"
               opacity={0.94}
@@ -81,7 +81,7 @@ export default function PlayoffBracket({ matches }: { matches: BracketMatchInput
               cx={dot.x}
               cy={dot.y}
               r={dot.r}
-              fill={dot.advancing ? '#f59e0b' : dot.kind === 'winner' ? '#111827' : dot.eliminated ? '#cbd5e1' : '#475569'}
+              fill={dot.advancing ? '#f59e0b' : dot.eliminated ? '#cbd5e1' : '#475569'}
               stroke="#fbfaf7"
               strokeWidth={1.4}
               opacity={dot.eliminated ? 0.52 : 1}
@@ -157,7 +157,7 @@ export default function PlayoffBracket({ matches }: { matches: BracketMatchInput
         <p className="text-center text-sm font-semibold">🏆 Maailmanmestari: {getCountry(champion).name}</p>
       )}
       <p className="text-xs leading-relaxed text-gray-400">
-        Himmennetty = pudonnut jatkosta. Kultainen reitti = ratkaistun ottelun voittajan eteneminen. Yhdyslinjat ovat suuntaa-antavia (football-data.org ei kerro tasmallista lohkopuuta).
+        Himmennetty = pudonnut jatkosta. Kultainen reitti = ratkaistun ottelun voittajan eteneminen.
       </p>
     </div>
   )

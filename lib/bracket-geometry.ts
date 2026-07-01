@@ -1,9 +1,37 @@
 // Geometry for the circular playoff bracket (web SVG + Telegram PNG share this).
 //
-// football-data.org does not expose true bracket-tree adjacency (which match's
-// winner plays which next match), only stage + kickoff time. We approximate
-// bracket order by sorting each stage by kickoff_at. Team labels remain accurate;
-// only the connecting tree can be approximate until the API resolves more data.
+// football-data.org gives us stage + external_id + kickoff_at per match, but not
+// which match's winner plays which next match. Verified against real WC 2026
+// data (Supabase `matches` table) that sorting each stage by `external_id`
+// ascending — NOT `kickoff_at`, which reorders unpredictably relative to the
+// bracket — groups sibling matches (the two matches that feed the same
+// next-round match) as consecutive pairs: e.g. external_id 537415/537416
+// (Germany–Paraguay, France–Sweden) both feed the real LAST_16 Paraguay v France
+// match; 537417/537418 both feed Canada v Morocco; 537423/537424 both feed
+// Brazil v Norway.
+//
+// But each ring's own slot order still needs to align with its parent ring —
+// otherwise a resolved team's dot lands wherever its stage's external_id order
+// happens to put it, which can be on the opposite side of the circle from the
+// pair that actually produced it (e.g. Brazil/Norway's real LAST_16 match sits
+// at natural index 2, but the pair feeding it is at LAST_32 index 8/9 — no
+// arithmetic rule connects those two positions). `orderStageByParent()` fixes
+// this by reordering each ring, pair by pair, to match wherever a finished
+// match's winner actually shows up in the next round (falling back to the
+// pair's natural position when the next round isn't resolved yet).
+//
+// Two kinds of path: a gray "pairing" elbow between a match's two team dots
+// (dot -> branch -> arc -> branch -> dot; always drawn, decided or not — it's
+// just showing who plays whom, never a guess), and an amber "advance" path per
+// decided match that illuminates the winner's own half of that same elbow
+// rather than drawing a new line beside it. The advance path retraces the
+// winner's radial stub (dot -> branch), rides the pairing arc to the match
+// spine (its center angle), then drops straight radially inward onto that same
+// team's dot in the next ring (where its flag circle is drawn) — the spine
+// angle equals the next-ring dot angle because orderStageByParent aligned
+// them, so that last segment is a clean radial hop. Once the next match is
+// also decided, another "advance" path illuminates its elbow the same way,
+// and so on until the final feeds into the center trophy.
 
 export type BracketStage = 'LAST_32' | 'LAST_16' | 'QUARTER_FINALS' | 'SEMI_FINALS' | 'FINAL'
 
@@ -11,6 +39,7 @@ const STAGE_ORDER: BracketStage[] = ['LAST_32', 'LAST_16', 'QUARTER_FINALS', 'SE
 
 export interface BracketMatchInput {
   stage: string
+  external_id: number
   home_team: string
   away_team: string
   home_score: number | null
@@ -34,23 +63,36 @@ export interface BracketNode {
   eliminated: boolean
   advancing: boolean
   textAnchor: 'start' | 'middle' | 'end'
-}
-
-export interface BracketLine {
-  x1: number; y1: number; x2: number; y2: number
+  /** Where this node's own match-pairing stem bends inward, at branchRadius —
+   *  the start of the arc a decided team's advance path rides along, so the
+   *  amber illuminates the existing gray elbow rather than a new diagonal. */
+  branchX: number
+  branchY: number
+  /** The match's inward "spine" point: on the pairing arc at branchRadius, at
+   *  the match's center angle. Because orderStageByParent aligns each next-round
+   *  dot to the pair that produced it, this angle equals the winner's dot angle
+   *  in the next ring — so the advance path drops straight (radially) inward
+   *  from here onto that dot. */
+  spineX: number
+  spineY: number
+  /** Radius of this node's pairing arc (for drawing the branch→spine arc). */
+  branchRadius: number
+  /** Raw (unnormalized) angle of this node's own slot and of its match center,
+   *  used to pick the arc sweep direction from branch to spine. */
+  slotAngleRaw: number
+  matchCenterRaw: number
 }
 
 export interface BracketPath {
   d: string
-  kind: 'branch' | 'connector' | 'final'
-  active?: boolean
+  kind: 'pairing' | 'advance'
 }
 
 export interface BracketDot {
   x: number
   y: number
   r: number
-  kind: 'team' | 'junction' | 'winner'
+  kind: 'team'
   eliminated?: boolean
   advancing?: boolean
 }
@@ -59,9 +101,8 @@ export interface BracketLayout {
   size: number
   center: number
   nodes: BracketNode[]
-  /** Legacy simple spoke lines, kept for Telegram until that renderer is redesigned. */
-  lines: BracketLine[]
-  /** Rich circular bracket paths for the web SVG renderer. */
+  /** One path per decided match: winner's dot in this ring straight to the
+   *  same team's dot in the next ring (or the center trophy, for the final). */
   paths: BracketPath[]
   dots: BracketDot[]
   champion: string | null
@@ -93,19 +134,49 @@ function winnerFor(m: BracketMatchInput, side: 'HOME' | 'AWAY'): boolean {
   return side === 'HOME' ? m.home_score > m.away_score : m.away_score > m.home_score
 }
 
+function isFinished(m: BracketMatchInput): boolean {
+  return m.status === 'FINISHED' && m.home_score !== null && m.away_score !== null
+}
+
+function winnerName(m: BracketMatchInput): string {
+  return winnerFor(m, 'HOME') ? m.home_team : m.away_team
+}
+
 function labelAnchor(angle: number): 'start' | 'middle' | 'end' {
   if (angle > -110 && angle < -70) return 'middle'
   if (angle > 70 && angle < 110) return 'middle'
   return angle > 90 || angle < -90 ? 'end' : 'start'
 }
 
-function arcPath(
-  from: { x: number; y: number },
-  to: { x: number; y: number },
-  radius: number,
-  sweep: 0 | 1,
-): string {
-  return `M ${pointCmd(from)} A ${fmt(radius)} ${fmt(radius)} 0 0 ${sweep} ${pointCmd(to)}`
+/** Reorders `natural` (the next stage, in external_id order) so that pair
+ *  `pairIdx` in `parent` (two consecutive matches, already in display order)
+ *  lines up with the match at display position `pairIdx` here. A pair's target
+ *  is resolved by name once its match is finished; unresolved pairs get
+ *  whatever position is left over, in order — always a valid full reordering. */
+function orderStageByParent(parent: BracketMatchInput[], natural: BracketMatchInput[]): BracketMatchInput[] {
+  const n = natural.length
+  if (parent.length !== n * 2) return natural
+
+  const targetForPair = new Map<number, number>()
+  const usedTargets = new Set<number>()
+  for (let pairIdx = 0; pairIdx < n; pairIdx++) {
+    for (const pm of [parent[pairIdx * 2], parent[pairIdx * 2 + 1]]) {
+      if (!isFinished(pm)) continue
+      const foundIdx = natural.findIndex((nm) => nm.home_team === winnerName(pm) || nm.away_team === winnerName(pm))
+      if (foundIdx >= 0 && !usedTargets.has(foundIdx)) {
+        targetForPair.set(pairIdx, foundIdx)
+        usedTargets.add(foundIdx)
+        break
+      }
+    }
+  }
+
+  const remaining = Array.from({ length: n }, (_, i) => i).filter((i) => !usedTargets.has(i))
+  let ri = 0
+  return Array.from({ length: n }, (_, pairIdx) => {
+    const targetIdx = targetForPair.get(pairIdx) ?? remaining[ri++]
+    return natural[targetIdx]
+  })
 }
 
 export function buildBracketLayout(matches: BracketMatchInput[]): BracketLayout | null {
@@ -120,47 +191,48 @@ export function buildBracketLayout(matches: BracketMatchInput[]): BracketLayout 
   const innerRadius = 118
   const ringGap = stages.length > 1 ? (outerRadius - innerRadius) / (stages.length - 1) : 0
   const branchDepth = stages.length > 1 ? Math.min(56, Math.max(34, ringGap * 0.58)) : 54
-  const centerClearance = 78
 
   const byStage = new Map<string, BracketMatchInput[]>()
-  for (const s of stages) {
-    byStage.set(
-      s,
-      matches.filter((m) => m.stage === s).sort((a, b) => +new Date(a.kickoff_at) - +new Date(b.kickoff_at)),
-    )
-  }
+  stages.forEach((s, i) => {
+    const natural = matches.filter((m) => m.stage === s).sort((a, b) => a.external_id - b.external_id)
+    const parent = i > 0 ? byStage.get(stages[i - 1]) : undefined
+    byStage.set(s, parent ? orderStageByParent(parent, natural) : natural)
+  })
 
   const nodes: BracketNode[] = []
-  const lines: BracketLine[] = []
-  const paths: BracketPath[] = []
   const dots: BracketDot[] = []
+  const paths: BracketPath[] = []
 
   stages.forEach((stage, ringIdx) => {
     const stageMatches = byStage.get(stage)!
     const radius = outerRadius - ringIdx * ringGap
     const slots = stageMatches.length * 2
-    const isFinalRing = ringIdx === stages.length - 1
+    const branchRadius = Math.max(innerRadius - ringGap, radius - branchDepth)
 
     stageMatches.forEach((m, mi) => {
-      const homeWon = winnerFor(m, 'HOME')
-      const awayWon = winnerFor(m, 'AWAY')
-      const finished = m.status === 'FINISHED' && m.home_score !== null && m.away_score !== null
       const sides: { team: string; won: boolean }[] = [
-        { team: m.home_team, won: homeWon },
-        { team: m.away_team, won: awayWon },
+        { team: m.home_team, won: winnerFor(m, 'HOME') },
+        { team: m.away_team, won: winnerFor(m, 'AWAY') },
       ]
-      const matchPoints: { outer: { x: number; y: number }; inner: { x: number; y: number }; won: boolean }[] = []
+      const finished = isFinished(m)
+      const outers: { x: number; y: number }[] = []
+
+      // The match's inward "spine": on the pairing arc, at the match's center
+      // angle — the point both advance paths ride the arc toward and then drop
+      // radially inward from.
+      const matchCenterRaw = (mi * 2 + 1) * (360 / slots) - 90
+      const spine = polar(center, branchRadius, matchCenterRaw)
 
       sides.forEach((side, si) => {
         const slotIndex = mi * 2 + si
         const rawAngle = (slotIndex + 0.5) * (360 / slots) - 90
         const angle = normalizeAngle(rawAngle)
-        const branchRadius = Math.max(centerClearance, radius - branchDepth)
         const outer = polar(center, radius, rawAngle)
-        const inner = polar(center, isFinalRing ? centerClearance : branchRadius, rawAngle)
         const label = polar(center, labelRadius, rawAngle)
         const flag = polar(center, flagRadius, rawAngle)
         const eliminated = finished && !side.won
+
+        const branch = polar(center, branchRadius, rawAngle)
 
         nodes.push({
           team: side.team,
@@ -175,6 +247,13 @@ export function buildBracketLayout(matches: BracketMatchInput[]): BracketLayout 
           eliminated,
           advancing: side.won,
           textAnchor: labelAnchor(angle),
+          branchX: branch.x,
+          branchY: branch.y,
+          spineX: spine.x,
+          spineY: spine.y,
+          branchRadius,
+          slotAngleRaw: rawAngle,
+          matchCenterRaw,
         })
         dots.push({
           x: outer.x,
@@ -184,95 +263,82 @@ export function buildBracketLayout(matches: BracketMatchInput[]): BracketLayout 
           eliminated,
           advancing: side.won,
         })
-        matchPoints.push({ outer, inner, won: side.won })
-
-        if (ringIdx < stages.length - 1) {
-          const nextRadius = outerRadius - (ringIdx + 1) * ringGap
-          const nextStageMatches = byStage.get(stages[ringIdx + 1])!
-          const nextSlots = Math.max(1, nextStageMatches.length * 2)
-          const nextSlotIndex = Math.min(Math.floor(slotIndex / 2), nextSlots - 1)
-          const nextAngle = (nextSlotIndex + 0.5) * (360 / nextSlots) - 90
-          const nextPoint = polar(center, nextRadius, nextAngle)
-          lines.push({ x1: outer.x, y1: outer.y, x2: nextPoint.x, y2: nextPoint.y })
-        }
+        outers.push(outer)
       })
 
-      if (matchPoints.length !== 2) return
-
-      const slotAngleA = (mi * 2 + 0.5) * (360 / slots) - 90
-      const slotAngleB = (mi * 2 + 1.5) * (360 / slots) - 90
-      const midAngle = slotAngleA + ((slotAngleB - slotAngleA) / 2)
-      const branchRadius = Math.max(centerClearance, radius - branchDepth)
-      const mid = polar(center, isFinalRing ? centerClearance : branchRadius, midAngle)
-
-      if (isFinalRing) {
-        paths.push({
-          kind: 'final',
-          d: `M ${pointCmd(matchPoints[0].outer)} L ${pointCmd(matchPoints[0].inner)} M ${pointCmd(matchPoints[1].outer)} L ${pointCmd(matchPoints[1].inner)}`,
-        })
-        const winner = matchPoints.find((point) => point.won)
-        if (winner) {
-          paths.push({
-            kind: 'final',
-            active: true,
-            d: `M ${pointCmd(winner.outer)} L ${pointCmd(winner.inner)}`,
-          })
-        }
-        dots.push({ x: matchPoints[0].inner.x, y: matchPoints[0].inner.y, r: 4.2, kind: 'winner' })
-        dots.push({ x: matchPoints[1].inner.x, y: matchPoints[1].inner.y, r: 4.2, kind: 'winner' })
-      } else {
+      // Gray pairing arc: dot -> branch -> arc -> branch -> dot, showing who
+      // plays whom. Drawn for every match regardless of outcome, never a guess.
+      // A decided match's amber advance path (below) is drawn on top of the
+      // winner's half of this exact elbow, so the highlight illuminates the
+      // existing bracket line rather than adding a new one.
+      if (outers.length === 2) {
+        const slotAngleA = (mi * 2 + 0.5) * (360 / slots) - 90
+        const slotAngleB = (mi * 2 + 1.5) * (360 / slots) - 90
         const largeArc = Math.abs(slotAngleB - slotAngleA) > 180 ? 1 : 0
+        const innerA = polar(center, branchRadius, slotAngleA)
+        const innerB = polar(center, branchRadius, slotAngleB)
         paths.push({
-          kind: 'branch',
+          kind: 'pairing',
           d: [
-            `M ${pointCmd(matchPoints[0].outer)} L ${pointCmd(matchPoints[0].inner)}`,
-            `M ${pointCmd(matchPoints[0].inner)} A ${fmt(branchRadius)} ${fmt(branchRadius)} 0 ${largeArc} 1 ${pointCmd(matchPoints[1].inner)}`,
-            `M ${pointCmd(matchPoints[1].inner)} L ${pointCmd(matchPoints[1].outer)}`,
+            `M ${pointCmd(outers[0])} L ${pointCmd(innerA)}`,
+            `M ${pointCmd(innerA)} A ${fmt(branchRadius)} ${fmt(branchRadius)} 0 ${largeArc} 1 ${pointCmd(innerB)}`,
+            `M ${pointCmd(innerB)} L ${pointCmd(outers[1])}`,
           ].join(' '),
         })
-        const winnerIndex = matchPoints.findIndex((point) => point.won)
-        if (winnerIndex >= 0) {
-          const winner = matchPoints[winnerIndex]
-          paths.push({
-            kind: 'branch',
-            active: true,
-            d: [
-              `M ${pointCmd(winner.outer)} L ${pointCmd(winner.inner)}`,
-              arcPath(winner.inner, mid, branchRadius, winnerIndex === 0 ? 1 : 0),
-            ].join(' '),
-          })
-        }
-        dots.push({ x: matchPoints[0].inner.x, y: matchPoints[0].inner.y, r: 3.4, kind: 'junction' })
-        dots.push({ x: matchPoints[1].inner.x, y: matchPoints[1].inner.y, r: 3.4, kind: 'junction' })
-        dots.push({ x: mid.x, y: mid.y, r: 4.2, kind: 'winner', advancing: winnerIndex >= 0 })
-
-        if (ringIdx < stages.length - 1) {
-          const nextRadius = outerRadius - (ringIdx + 1) * ringGap
-          const nextStageMatches = byStage.get(stages[ringIdx + 1])!
-          const nextSlots = Math.max(1, nextStageMatches.length * 2)
-          const nextSlotIndex = Math.min(mi, nextSlots - 1)
-          const nextAngle = (nextSlotIndex + 0.5) * (360 / nextSlots) - 90
-          const target = polar(center, nextRadius, nextAngle)
-          const controlRadius = (branchRadius + nextRadius) / 2
-          const controlAngle = midAngle + (nextAngle - midAngle) * 0.45
-          const control = polar(center, controlRadius, controlAngle)
-          const connectorPath = `M ${pointCmd(mid)} Q ${pointCmd(control)} ${pointCmd(target)}`
-          paths.push({ kind: 'connector', d: connectorPath })
-          if (finished) paths.push({ kind: 'connector', active: true, d: connectorPath })
-        }
       }
     })
+  })
+
+  // One advancement path per decided match, illuminating the winner's own
+  // existing gray elbow rather than drawing a new diagonal across it:
+  //   winner's dot -> its branch point (retraces its own radial stub)
+  //     -> along the pairing arc to the match spine (retraces half the arc)
+  //       -> straight radially inward onto its dot in the next ring.
+  // The spine sits at the match's center angle, which orderStageByParent has
+  // aligned to the winner's next-ring dot angle, so that final segment is a
+  // clean radial drop landing exactly on the dot (or the center trophy, for
+  // the final). If the next round isn't placed yet, only the winner's own
+  // stub is lit — never a guess, since the destination is found by name.
+  stages.forEach((stage, ringIdx) => {
+    const stageMatches = byStage.get(stage)!
+    const isFinalRing = ringIdx === stages.length - 1
+    for (const m of stageMatches) {
+      if (!isFinished(m)) continue
+      const winner = winnerName(m)
+      const fromNode = nodes.find((n) => n.ring === ringIdx && n.team === winner)
+      if (!fromNode) continue
+
+      const to = isFinalRing ? { x: center, y: center } : undefined
+      const toNode = isFinalRing ? undefined : nodes.find((n) => n.ring === ringIdx + 1 && n.team === winner)
+      const destination = to ?? (toNode && { x: toNode.x, y: toNode.y })
+
+      if (!destination) {
+        // Next round not placed yet — just light the winner's own radial stub.
+        paths.push({ kind: 'advance', d: `M ${pointCmd({ x: fromNode.x, y: fromNode.y })} L ${pointCmd({ x: fromNode.branchX, y: fromNode.branchY })}` })
+        continue
+      }
+
+      // Arc sweep from the winner's slot toward the (more central) spine angle.
+      const sweep = fromNode.matchCenterRaw > fromNode.slotAngleRaw ? 1 : 0
+      const r = fromNode.branchRadius
+      paths.push({
+        kind: 'advance',
+        d: [
+          `M ${pointCmd({ x: fromNode.x, y: fromNode.y })}`,
+          `L ${pointCmd({ x: fromNode.branchX, y: fromNode.branchY })}`,
+          `A ${fmt(r)} ${fmt(r)} 0 0 ${sweep} ${pointCmd({ x: fromNode.spineX, y: fromNode.spineY })}`,
+          `L ${pointCmd(destination)}`,
+        ].join(' '),
+      })
+    }
   })
 
   const finalStage = stages[stages.length - 1]
   const finalMatch = byStage.get(finalStage)![0]
   let champion: string | null = null
-  if (finalMatch && finalMatch.status === 'FINISHED' && finalMatch.home_score !== null && finalMatch.away_score !== null) {
-    if (finalMatch.home_score > finalMatch.away_score) champion = finalMatch.home_team
-    else if (finalMatch.away_score > finalMatch.home_score) champion = finalMatch.away_team
-    else if (finalMatch.winner_team === 'HOME') champion = finalMatch.home_team
-    else if (finalMatch.winner_team === 'AWAY') champion = finalMatch.away_team
+  if (finalMatch && isFinished(finalMatch)) {
+    champion = winnerName(finalMatch)
   }
 
-  return { size, center, nodes, lines, paths, dots, champion }
+  return { size, center, nodes, paths, dots, champion }
 }

@@ -445,7 +445,7 @@ export async function sendBracketImage(chatId?: number | string): Promise<void> 
 
   const { data: matches } = await admin
     .from('matches')
-    .select('stage, home_team, away_team, home_score, away_score, winner_team, status, kickoff_at')
+    .select('stage, external_id, home_team, away_team, home_score, away_score, winner_team, status, kickoff_at')
 
   if (!matches || !matches.some((m) => m.stage !== 'GROUP_STAGE')) {
     await sendMessage(target, 'ℹ️ Pudotuspelit eivät ole vielä alkaneet.')
