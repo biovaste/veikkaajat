@@ -7,6 +7,7 @@ import { calculatePoints } from '../scoring/engine'
 import { assignColors } from '../colors'
 import { getEliminatedCountries, isChampionPickEliminated, isScorerPickEliminated } from '../eliminations'
 import { fetchTopScorers } from '../football-data/client'
+import { fetchAllRows } from '../supabase/fetch-all'
 
 const ELIMINATED_COLOR = '#dc2626'
 
@@ -159,10 +160,15 @@ export async function sendStatsTable(chatId?: number | string): Promise<void> {
   const admin = createServiceRoleClient()
 
   const [{ data: log }, { data: profiles }, { data: catBets }, { data: preds }, { data: firstMatch }, { data: xgMatches }, { data: koMatches }] = await Promise.all([
-    admin.from('scoring_log').select('user_id, points, breakdown, match_id, matches(stage, kickoff_at)').order('match_id', { ascending: true }),
+    // scoring_log/predictions exceed PostgREST's 1000-row response cap — page through
+    fetchAllRows((from, to) =>
+      admin.from('scoring_log').select('user_id, points, breakdown, match_id, matches(stage, kickoff_at)')
+        .order('match_id', { ascending: true }).order('id').range(from, to)),
     admin.from('profiles').select('id, display_name').order('display_name'),
     admin.from('category_bets').select('user_id, category, bet_value, points'),
-    admin.from('predictions').select('user_id, home_score_pred, away_score_pred, match_id, matches(home_score, away_score, status, home_xg, away_xg)'),
+    fetchAllRows((from, to) =>
+      admin.from('predictions').select('user_id, home_score_pred, away_score_pred, match_id, matches(home_score, away_score, status, home_xg, away_xg)')
+        .order('id').range(from, to)),
     admin.from('matches').select('kickoff_at').order('kickoff_at', { ascending: true }).limit(1).single(),
     admin.from('matches').select('id, home_xg, away_xg').not('home_xg', 'is', null).not('away_xg', 'is', null),
     admin.from('matches').select('home_team, away_team, home_score, away_score, winner_team, stage, status'),
@@ -481,7 +487,9 @@ export async function sendChartImage(chatId?: number | string): Promise<void> {
 
   const [{ data: profiles }, { data: log }, { data: catBets }] = await Promise.all([
     admin.from('profiles').select('id, display_name, chart_color').order('display_name'),
-    admin.from('scoring_log').select('user_id, points, match_id').order('match_id', { ascending: true }),
+    fetchAllRows((from, to) =>
+      admin.from('scoring_log').select('user_id, points, match_id')
+        .order('match_id', { ascending: true }).order('id').range(from, to)),
     admin.from('category_bets').select('user_id, points'),
   ])
 
@@ -571,7 +579,8 @@ export async function sendClanWar(chatId?: number | string): Promise<void> {
 
   const [{ data: profiles }, { data: log }, { data: catBets }] = await Promise.all([
     admin.from('profiles').select('id, display_name, clan').order('display_name'),
-    admin.from('scoring_log').select('user_id, points'),
+    fetchAllRows((from, to) =>
+      admin.from('scoring_log').select('user_id, points').order('id').range(from, to)),
     admin.from('category_bets').select('user_id, points'),
   ])
 
@@ -686,12 +695,12 @@ export async function sendOddsReport(chatId?: number | string): Promise<void> {
 
   const uniqueDates = [...new Set(matches.map((m) => m.kickoff_at.slice(0, 10)))]
 
-  // All predictions on finished matches
+  // All predictions on finished matches — exceeds PostgREST's 1000-row cap, page through
   const matchIds = matches.map((m) => m.id)
-  const { data: preds } = await db
-    .from('predictions')
-    .select('user_id, match_id, home_score_pred, away_score_pred, points')
-    .in('match_id', matchIds)
+  const { data: preds } = await fetchAllRows((from, to) =>
+    db.from('predictions')
+      .select('user_id, match_id, home_score_pred, away_score_pred, points')
+      .in('match_id', matchIds).order('id').range(from, to))
 
   const { data: players } = await db
     .from('profiles')

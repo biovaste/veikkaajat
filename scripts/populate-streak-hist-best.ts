@@ -8,6 +8,7 @@
  */
 
 import { createClient } from '@supabase/supabase-js'
+import { fetchAllRows } from '../lib/supabase/fetch-all'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -30,9 +31,12 @@ function meets(type: StreakType, points: number, signPred: string | null, result
 
 async function main() {
   // Fetch all hist_predictions with match + competition year for ordering
-  const { data: preds, error } = await supabase
-    .from('hist_predictions')
-    .select('player_name, points, sign_pred, hist_matches(match_num, result_sign, competition_id, competitions(year))')
+  // (well over PostgREST's 1000-row response cap — page through)
+  const { data: preds, error } = await fetchAllRows((from, to) =>
+    supabase
+      .from('hist_predictions')
+      .select('player_name, points, sign_pred, hist_matches(match_num, result_sign, competition_id, competitions(year))')
+      .order('id').range(from, to))
 
   if (error) throw error
 

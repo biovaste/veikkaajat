@@ -32,6 +32,25 @@ async function tgSend(chatId: string | number, text: string) {
   if (!res.ok) console.error('[tg]', await res.text())
 }
 
+// Mirrors lib/supabase/fetch-all.ts: PostgREST caps responses at 1000 rows,
+// silently truncating larger sets — scoring_log is past that size, so any
+// unbounded read must page through. The page callback must apply a
+// deterministic .order() before .range().
+async function fetchAllRows<T>(
+  page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+  pageSize = 1000,
+): Promise<{ data: T[] | null; error: { message: string } | null }> {
+  const all: T[] = []
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await page(from, from + pageSize - 1)
+    if (error) return { data: null, error }
+    if (!data || data.length === 0) break
+    all.push(...data)
+    if (data.length < pageSize) break
+  }
+  return { data: all, error: null }
+}
+
 function calcPoints(
   pred: { home: number; away: number },
   result: { home: number; away: number },
@@ -173,7 +192,8 @@ async function sendResultMessage(
   const [{ data: preds }, { data: players }, { data: log }, { data: catBets }] = await Promise.all([
     db.from('predictions').select('user_id, home_score_pred, away_score_pred, points').eq('match_id', matchId),
     db.from('profiles').select('id, display_name'),
-    db.from('scoring_log').select('user_id, points, match_id, breakdown'),
+    fetchAllRows((from, to) =>
+      db.from('scoring_log').select('user_id, points, match_id, breakdown').order('id').range(from, to)),
     db.from('category_bets').select('user_id, points'),
   ])
 

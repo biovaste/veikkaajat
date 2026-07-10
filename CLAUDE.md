@@ -81,6 +81,13 @@ Special bet scoring: `app/api/admin/score-categories/route.ts`.
 
 ## Key Architectural Decisions
 
+- **PostgREST 1000-row response cap**: Supabase silently truncates every query response at 1000
+  rows — an explicit `.limit()` above 1000 does NOT raise it. `scoring_log` and `predictions`
+  crossed that size mid-tournament (2026-07-10), which made the leaderboard page, Telegram
+  standings, /stats, /chart, /clanwar, /odds, and streaks all drop the newest matches' points.
+  Any unbounded read of `scoring_log`, `mv_player_match_log`, `predictions`, or `hist_predictions`
+  MUST page via `fetchAllRows()` (`lib/supabase/fetch-all.ts`; mirrored inline in the
+  `poll-match-results` edge function) with a deterministic `.order()` before `.range()`.
 - **Admin writes**: seed, override, and retry-Telegram-failure API routes use `createServerClient()` (anon key + cookie session). RLS allows writes because `profiles.is_admin = true` for the authenticated user (see migration 0004, and 0026 for `telegram_send_failures`). `createServiceRoleClient()` is reserved for `auth.admin.*` operations (e.g. inviting users), for reading all players' predictions in the leaderboard (bypasses `predictions_select_own` RLS), and for the scheduled cron functions (which have no user session). Note: the new Supabase "Secret API key" is NOT the legacy `service_role` JWT and does not bypass RLS — don't confuse them.
 - **Prediction deadline**: 5 minutes before kickoff. Enforced client-side (form hidden, countdown shows "Aikaa kohteen sulkeutumiseen:") and server-side (`POST /api/predictions` rejects if `kickoff_at − 5 min <= now()`). Kickoff time displayed to players is unchanged.
 - **No open signup**: admin uses `/admin/players` to invite users via `supabase.auth.admin.inviteUserByEmail()`.

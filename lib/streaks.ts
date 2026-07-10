@@ -1,4 +1,5 @@
 import { SupabaseClient } from '@supabase/supabase-js'
+import { fetchAllRows } from './supabase/fetch-all'
 
 export type StreakType = 'correct_5p' | 'right_result' | 'wrong_result' | 'zero_p' | 'non_zero_p' | 'non_5p'
 
@@ -29,9 +30,11 @@ function meetsCondition(type: StreakType, points: number, breakdown: { result: n
 export async function computeStreaks(admin: SupabaseClient): Promise<PlayerStreaks[]> {
   const [{ data: profiles }, { data: log }, { data: seeds }] = await Promise.all([
     admin.from('profiles').select('id, display_name').order('display_name'),
-    admin.from('scoring_log')
-      .select('user_id, points, breakdown, match_id, matches(kickoff_at)')
-      .order('match_id', { ascending: true }),
+    // scoring_log exceeds PostgREST's 1000-row response cap — page through
+    fetchAllRows((from, to) =>
+      admin.from('scoring_log')
+        .select('user_id, points, breakdown, match_id, matches(kickoff_at)')
+        .order('match_id', { ascending: true }).order('id').range(from, to)),
     admin.from('streak_seeds').select('display_name, streak_type, current, hist_best'),
   ])
 

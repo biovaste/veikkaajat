@@ -10,6 +10,7 @@ import { getEliminatedCountries, isChampionPickEliminated, isScorerPickEliminate
 import { fetchTopScorers } from '@/lib/football-data/client'
 import { getCountry } from '@/lib/countries'
 import { isWildcard, wildcardCountry } from '@/lib/players'
+import { fetchAllRows } from '@/lib/supabase/fetch-all'
 
 export const dynamic = 'force-dynamic'
 
@@ -37,9 +38,14 @@ export default async function LeaderboardPage() {
     { data: picks },
   ] = await Promise.all([
     supabase.from('profiles').select('id, display_name, chart_color').order('display_name'),
-    supabase.from('mv_player_match_log').select('user_id, points, breakdown, match_id, stage, kickoff_at, match_day').order('match_id', { ascending: true }),
+    // scoring_log/predictions exceed PostgREST's 1000-row response cap — page through
+    fetchAllRows((from, to) =>
+      supabase.from('mv_player_match_log').select('user_id, points, breakdown, match_id, stage, kickoff_at, match_day')
+        .order('match_id', { ascending: true }).order('user_id').range(from, to)),
     supabase.from('category_bets').select('user_id, points, category').not('points', 'is', null),
-    srSupabase.from('predictions').select('user_id, home_score_pred, away_score_pred, match_id, matches(home_score, away_score, status)'),
+    fetchAllRows((from, to) =>
+      srSupabase.from('predictions').select('user_id, home_score_pred, away_score_pred, match_id, matches(home_score, away_score, status)')
+        .order('id').range(from, to)),
     supabase.from('matches').select('id, home_xg, away_xg').not('home_xg', 'is', null).not('away_xg', 'is', null),
     supabase.from('matches').select('kickoff_at').order('kickoff_at', { ascending: true }).limit(1).maybeSingle(),
     supabase.from('matches').select('external_id, home_team, away_team, home_score, away_score, winner_team, stage, status, kickoff_at'),

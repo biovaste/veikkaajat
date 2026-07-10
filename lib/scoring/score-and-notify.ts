@@ -1,6 +1,7 @@
 import { SupabaseClient } from '@supabase/supabase-js'
 import { calculatePoints } from './engine'
 import { sendResultMessage, type LeaderboardRow, type PlayerInfo } from '../telegram/notify'
+import { fetchAllRows } from '../supabase/fetch-all'
 
 /**
  * Scores all predictions for a match, updates scoring_log, and sends the
@@ -23,7 +24,10 @@ export async function scoreMatchAndNotify(
 ): Promise<{ scored: number; error?: string }> {
   // Snapshot leaderboard BEFORE scoring this match (exclude current match's log)
   const [{ data: prevLog }, { data: catBets }] = await Promise.all([
-    admin.from('scoring_log').select('user_id, points, breakdown').neq('match_id', matchId),
+    // scoring_log exceeds PostgREST's 1000-row response cap — page through
+    fetchAllRows((from, to) =>
+      admin.from('scoring_log').select('user_id, points, breakdown')
+        .neq('match_id', matchId).order('id').range(from, to)),
     admin.from('category_bets').select('user_id, points'),
   ])
 

@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import { formatDate } from '@/lib/utils'
 import { getCountry, flagUrl, groupLabel } from '@/lib/countries'
 import { isWildcard, wildcardCountry } from '@/lib/players'
+import { fetchAllRows } from '@/lib/supabase/fetch-all'
 
 export const dynamic = 'force-dynamic'
 
@@ -26,7 +27,10 @@ export default async function AllPredictionsPage() {
   ] = await Promise.all([
     supabase.from('profiles').select('id, display_name').order('display_name'),
     supabase.from('matches').select('id, home_team, away_team, kickoff_at, status, home_score, away_score, stage, group_name').order('kickoff_at', { ascending: false }),
-    sr.from('predictions').select('user_id, match_id, home_score_pred, away_score_pred, points'),
+    // predictions exceed PostgREST's 1000-row response cap — page through
+    fetchAllRows((from, to) =>
+      sr.from('predictions').select('user_id, match_id, home_score_pred, away_score_pred, points')
+        .order('id').range(from, to)),
     sr.from('category_bets').select('user_id, category, bet_value, points'),
     supabase.from('category_results').select('category, result_value'),
   ])

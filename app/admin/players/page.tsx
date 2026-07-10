@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { fetchAllRows } from '@/lib/supabase/fetch-all'
 
 interface Player {
   id: string
@@ -121,7 +122,9 @@ export default function PlayersPage() {
       .order('display_name')
 
     if (data) {
-      const { data: counts } = await supabase.from('predictions').select('user_id')
+      // predictions exceed PostgREST's 1000-row response cap — page through
+      const { data: counts } = await fetchAllRows((from, to) =>
+        supabase.from('predictions').select('user_id').order('id').range(from, to))
       const countMap: Record<string, number> = {}
       counts?.forEach((p) => { countMap[p.user_id] = (countMap[p.user_id] ?? 0) + 1 })
       setPlayers(data.map((p) => ({ ...p, prediction_count: countMap[p.id] ?? 0 })))
