@@ -134,6 +134,8 @@ export async function POST(request: NextRequest) {
       console.error('[webhook /setscore]', err)
       await sendMessage(chatId, '⚠️ Tulosasetus epäonnistui.').catch(console.error)
     })
+  } else if (text === '/tj' && (isGroup || isDM)) {
+    await sendMessage(chatId, buildTournamentCountdown()).catch(console.error)
   } else if (text === '/odds' && isGroup) {
     await sendOddsReport(chatId).catch(async (err) => {
       console.error('[webhook /odds]', err)
@@ -157,13 +159,50 @@ export async function POST(request: NextRequest) {
     const dmNote = isDM ? '\n\n📩 <b>Omat komennot (yksityisviesti):</b>\n/veikkaukset — seuraavat 5 veikkaustasi' : ''
     await sendMessage(
       chatId,
-      '📋 <b>Komennot (ryhmässä):</b>\n/chart — pistekehityskaavio\n/stats — tilastotaulukko\n/jatkokaavio — pudotuspelikaavio\n/odds — kerroinanalyysi (KA-kerroin & ROI)\n/luokkasota — klaanien pistetilanne\n/maaliporssi — turnauksen maalipörssi (top 10)\n/putki — peräkkäisputket (top 3)\n/haetulos — hae tulos heti\n/setscore &lt;id&gt; &lt;k-v&gt; [koti|vieras] — aseta tulos (vain admin)\n/matchid — ottelutunnukset (vain admin)' +
+      '📋 <b>Komennot (ryhmässä):</b>\n/chart — pistekehityskaavio\n/stats — tilastotaulukko\n/jatkokaavio — pudotuspelikaavio\n/odds — kerroinanalyysi (KA-kerroin & ROI)\n/luokkasota — klaanien pistetilanne\n/maaliporssi — turnauksen maalipörssi (top 10)\n/putki — peräkkäisputket (top 3)\n/haetulos — hae tulos heti\n/tj — aikaa seuraaviin turnauksiin\n/setscore &lt;id&gt; &lt;k-v&gt; [koti|vieras] — aseta tulos (vain admin)\n/matchid — ottelutunnukset (vain admin)' +
       dmNote +
       '\n\nVeikkaa: ' + (process.env.NEXT_PUBLIC_APP_URL ?? ''),
     ).catch(console.error)
   }
 
   return NextResponse.json({ ok: true })
+}
+
+// ── /tj handler (time until next major tournaments) ─────────────────────────
+
+const MAJOR_TOURNAMENTS = [
+  { name: 'EM 2028', start: new Date('2028-06-09T00:00:00Z') },
+  { name: 'MM 2030', start: new Date('2030-06-13T00:00:00Z') },
+]
+
+function timeUntil(target: Date, now: Date): { years: number; days: number; hours: number } {
+  let years = target.getFullYear() - now.getFullYear()
+  const cursor = new Date(now)
+  cursor.setFullYear(cursor.getFullYear() + years)
+  if (cursor > target) {
+    years--
+    cursor.setFullYear(cursor.getFullYear() - 1)
+  }
+  const remainingMs = target.getTime() - cursor.getTime()
+  const days = Math.floor(remainingMs / (1000 * 60 * 60 * 24))
+  const hours = Math.floor((remainingMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60))
+  return { years, days, hours }
+}
+
+function buildTournamentCountdown(): string {
+  const now = new Date()
+  const upcoming = MAJOR_TOURNAMENTS
+    .filter(t => t.start > now)
+    .sort((a, b) => a.start.getTime() - b.start.getTime())
+
+  if (upcoming.length === 0) return 'ℹ️ Ei tulevia turnauksia listalla.'
+
+  const lines = upcoming.map(t => {
+    const { years, days, hours } = timeUntil(t.start, now)
+    return `${t.name} alkuun aikaa ${years} vuotta, ${days} päivää, ${hours} tuntia`
+  })
+
+  return '🏆 <b>Seuraavat turnaukset</b>\n\n' + lines.join('\n')
 }
 
 // ── /matchid handler (admin only) ────────────────────────────────────────────
